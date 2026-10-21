@@ -100,10 +100,6 @@ Dans un terminal ouvert dans le dossier :
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Instructions du projet
-
-Les consignes de travail sont enregistrées dans [AGENTS.md](AGENTS.md) : versionnement alpha, mise à jour du README, vérifications, commit et push sur GitHub. Les nouvelles fonctionnalités font progresser la partie numérique (`0.02a` → `0.03a`), les corrections seules la lettre (`0.02a` → `0.02b`). Les changements purement documentaires conservent la version de l'application.
-
 ## Fichiers
 
 - `app.py` : interface Streamlit.
@@ -116,4 +112,3 @@ Les consignes de travail sont enregistrées dans [AGENTS.md](AGENTS.md) : versio
 - `install.bat` et `lancer.bat` : installation et lancement Windows.
 - `tests/` : tests unitaires et scénarios d'interface Streamlit.
 - `COMPTE_RENDU_REVIEW.md` : revue de code, corrections et vérifications.
-- `AGENTS.md` : instructions de contribution, de versionnement et de publication.
