@@ -188,22 +188,55 @@ def _repair_jsonl_line(text: str) -> tuple[list[dict[str, Any]], str]:
 
 
 def load_dataset(stream: BinaryIO, filename: str, *, repair_jsonl: bool = True,
-                 repairs: list[str] | None = None) -> tuple[list[Entry], list[str]]:
-    """Import JSONL, JSON, CSV, TSV, Parquet or an RP work project."""
+                 repairs: list[str] | None = None,
+                 entry_sources: dict[int, str] | None = None) -> tuple[list[Entry], list[str]]:
+    """Import a dataset; fill entry_sources only after a project is fully validated."""
     suffix = Path(filename).suffix.lower()
     errors: list[str] = []
     if filename.lower().endswith(".rpwork.json"):
-        payload = json.load(io.TextIOWrapper(stream, encoding="utf-8-sig"))
+        payload = json.loads(stream.read().decode("utf-8-sig"))
+        if not isinstance(payload, dict):
+            raise ValueError("Le projet doit contenir un objet JSON")
         if payload.get("format") != "rp-dataset-studio-v1":
             raise ValueError("Format de projet RP non reconnu")
+        if not isinstance(payload.get("entries"), list):
+            raise ValueError("Le champ entries du projet doit être une liste")
         entries = []
-        for item in payload.get("entries", []):
-            entries.append(Entry(uid=int(item["uid"]), data=item["data"],
-                                 source_line=int(item.get("source_line", 0)),
-                                 deleted=bool(item.get("deleted", False)),
-                                 language_override=item.get("language_override")))
-        if len({row.uid for row in entries}) != len(entries):
-            raise ValueError("Identifiants du projet en double")
+        uids = set()
+        for index, item in enumerate(payload["entries"], 1):
+            if not isinstance(item, dict) or not isinstance(item.get("data"), dict):
+                raise ValueError(f"Entrée {index} du projet : un objet data est requis")
+            uid = item.get("uid")
+            source_line = item.get("source_line", 0)
+            deleted = item.get("deleted", False)
+            language = item.get("language_override")
+            if type(uid) is not int or uid < 1:
+                raise ValueError(f"Entrée {index} du projet : identifiant entier positif requis")
+            if uid in uids:
+                raise ValueError("Identifiants du projet en double")
+            if type(source_line) is not int or source_line < 0:
+                raise ValueError(f"Entrée {index} du projet : numéro de ligne invalide")
+            if not isinstance(deleted, bool):
+                raise ValueError(f"Entrée {index} du projet : deleted doit être un booléen")
+            if language is not None and (not isinstance(language, str) or language not in LANG_CODES):
+                raise ValueError(f"Entrée {index} du projet : langue invalide")
+            uids.add(uid)
+            entries.append(Entry(uid, item["data"], source_line, deleted, language))
+        raw_sources = payload.get("entry_sources", {})
+        if not isinstance(raw_sources, dict):
+            raise ValueError("Le champ entry_sources du projet doit être un objet")
+        origins = {}
+        for key, name in raw_sources.items():
+            try:
+                uid = int(key)
+            except ValueError:
+                raise ValueError("Identifiant de provenance du projet invalide") from None
+            if str(uid) != key or uid not in uids or not isinstance(name, str):
+                raise ValueError("Provenance du projet invalide")
+            origins[uid] = name
+        if entry_sources is not None:
+            entry_sources.clear()
+            entry_sources.update(origins)
         return entries, []
     if suffix == ".jsonl":
         entries = []
@@ -318,8 +351,12 @@ def as_messages(data: dict[str, Any]) -> list[dict[str, str]] | None:
             question = _as_text(data.get(prompt_key))
             answer = _as_text(data.get(response_key))
             if question.strip() and answer.strip():
-                return [{"role": "user", "content": question},
-                        {"role": "assistant", "content": answer}]
+                messages = []
+                if _as_text(data.get("system")).strip():
+                    messages.append({"role": "system", "content": _as_text(data["system"])})
+                messages.extend([{"role": "user", "content": question},
+                                 {"role": "assistant", "content": answer}])
+                return messages
     return None
 
 
@@ -495,11 +532,13 @@ def export_jsonl(rows: list[Entry], chatml: bool = False) -> tuple[bytes, int]:
     return output.getvalue().encode("utf-8"), count
 
 
-def export_project(rows: list[Entry], source: str) -> bytes:
+def export_project(rows: list[Entry], source: str,
+                   entry_sources: dict[int, str] | None = None) -> bytes:
     payload = {"format": "rp-dataset-studio-v1", "source": source,
                "entries": [{"uid": r.uid, "data": r.data, "source_line": r.source_line,
                             "deleted": r.deleted, "language_override": r.language_override}
-                           for r in rows]}
+                           for r in rows],
+               "entry_sources": {str(uid): name for uid, name in (entry_sources or {}).items()}}
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")
 
 

@@ -13,6 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from split_export import export_split_zip
+from merge_ui import render_merge_page
+from conversion_ui import render_conversion_panel
 from core import (Entry, LANG_CODES, apply_filters, as_messages, content_text,
                   conversation_fields, update_conversation_text,
                   counts_by_language, delete_ids, duplicate_ids, effective_language,
@@ -48,7 +50,8 @@ def clear_exports():
         st.session_state.pop(key, None)
 
 
-def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | None = None):
+def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | None = None,
+           entry_sources: dict[int, str] | None = None):
     clear_exports()
     st.session_state.rows = rows
     st.session_state.dataset_name = name
@@ -59,6 +62,10 @@ def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | N
     st.session_state.filters = {"contains": "", "excludes": "", "languages": [],
                                 "regex": False, "unconvertible": False}
     st.session_state.page = 1
+    st.session_state.pop("merge_report", None)
+    st.session_state.entry_sources = dict(entry_sources or {})
+    for key in ("conversion_preview", "conversion_signature", "conversion_notice"):
+        st.session_state.pop(key, None)
 
 
 def mutation(action: dict):
@@ -93,22 +100,28 @@ def undo():
         for row in st.session_state.rows:
             if row.uid in before:
                 row.language_override = before[row.uid]
+    elif action["kind"] == "convert":
+        before = {uid: (data, deleted) for uid, data, deleted in action["before"]}
+        for row in st.session_state.rows:
+            if row.uid in before:
+                row.data, row.deleted = before[row.uid]
     st.session_state.revision += 1
 
 
 def import_file(source, name: str):
     try:
         repairs = []
+        entry_sources = {}
         with st.spinner(f"Lecture de {name}..."):
             rows, errors = load_dataset(
                 source, name, repair_jsonl=st.session_state.get("repair_jsonl_import", True),
-                repairs=repairs)
+                repairs=repairs, entry_sources=entry_sources)
         if not rows:
             st.error("Aucune entrée valide n'a été trouvée dans ce fichier.")
             for issue in errors:
                 st.error(issue)
             return
-        loaded(rows, name, errors, repairs)
+        loaded(rows, name, errors, repairs, entry_sources)
         st.rerun()
     except Exception as exc:
         st.error(f"Impossible d'ouvrir le fichier : {exc}")
@@ -173,7 +186,8 @@ def row_table(rows: list[Entry], *, prefix: str, page_size: int = 50) -> set[int
              "Messages": message_count(r.data), "Catégorie": label(r.data),
              "Extrait": preview(r.data), "Ligne": r.source_line} for r in shown]
     df = pd.DataFrame(data)
-    selection_key = f"{prefix}_grid_{st.session_state.revision}_{page}_{shown[0].uid}_{shown[-1].uid}"
+    page_ids = tuple(row.uid for row in shown)
+    selection_key = f"{prefix}_grid_{st.session_state.revision}_{page}_{page_ids}"
     editor = st.data_editor(
         df, key=selection_key, hide_index=True, width="stretch", height=min(650, 60 + 36 * len(shown)),
         disabled=["ID", "Langue", "Messages", "Catégorie", "Extrait", "Ligne"],
@@ -216,6 +230,8 @@ def inspector(rows: list[Entry], *, prefix: str):
     fields = conversation_fields(entry.data)
     st.caption(f"Entrée #{uid} · ligne {entry.source_line} · "
                f"{sum(len(field.text) for field in fields):,} caractères".replace(",", " "))
+    if uid in st.session_state.get("entry_sources", {}):
+        st.caption(f"Fichier source : {st.session_state.entry_sources[uid]}")
     mode = st.radio("Affichage de l'entrée", ["📖 Lecture", "✏️ Modifier les messages", "{ } JSON avancé"],
                     horizontal=True, key=f"{prefix}_view")
     if mode == "📖 Lecture":
@@ -284,11 +300,13 @@ def inspector(rows: list[Entry], *, prefix: str):
 
 
 initialize()
+if "navigate_after_action" in st.session_state:
+    st.session_state.navigation_page = st.session_state.pop("navigate_after_action")
 rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v1.0")
+    st.caption("Gestion locale de datasets JDR · v0.02a")
     st.divider()
     st.markdown("**Ouvrir un dataset**")
     st.checkbox("Réparer les erreurs JSONL simples", value=True, key="repair_jsonl_import",
@@ -318,13 +336,15 @@ with st.sidebar:
                      use_container_width=True):
             undo()
             st.rerun()
-        page = st.radio("Navigation", ["🔎 Explorer", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
-                        label_visibility="collapsed")
-    else:
-        page = "❔ Aide"
+    page = st.radio("Navigation", ["🔎 Explorer", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
+                    key="navigation_page", label_visibility="collapsed")
     st.divider()
     st.caption("🔒 Fichiers traités localement. Aucune donnée envoyée à un service externe."
                " Le navigateur communique uniquement avec l'application sur ce PC.")
+
+if page == "🧩 Fusionner":
+    render_merge_page(loaded)
+    st.stop()
 
 if not st.session_state.dataset_name:
     st.title("Éditeur local de datasets RP")
@@ -335,7 +355,8 @@ if not st.session_state.dataset_name:
     b.info("**2. Nettoie**\n\nLangues · mots-clés · doublons · édition")
     c.info("**3. Exporte**\n\nOriginal filtré · ChatML · projet")
     st.subheader("Commencer")
-    st.write("Utilise la colonne de gauche pour charger un dataset, ou clique sur « Charger le dataset de démonstration »." )
+    st.write("Utilise la colonne de gauche pour charger un dataset, ou clique sur « Charger le dataset de démonstration ». "
+             "Pour rassembler plusieurs fichiers, ouvre « 🧩 Fusionner ».")
     st.stop()
 
 live = [r for r in rows if not r.deleted]
@@ -451,18 +472,22 @@ elif page == "🧹 Qualité":
         if language_detection():
             st.rerun()
     st.divider()
+    render_conversion_panel(rows, mutation)
+    st.divider()
     st.markdown("#### Doublons exacts / quasi-identiques (espaces et casse ignorés)")
     duplicates = duplicate_ids(rows)
     st.metric("Doublons", len(duplicates))
     st.write("Conserve la première occurrence active et identifie les suivantes."
              " Ce contrôle n'est pas une comparaison sémantique.")
     if duplicates:
+        duplicate_set = set(duplicates)
+        displayed = [row for row in live if row.uid in duplicate_set][:100]
         st.dataframe(pd.DataFrame([{"ID": r.uid, "Langue": effective_language(r),
                                    "Conversation": preview(r.data)}
-                                  for r in live if r.uid in set(duplicates)][:100]),
+                                  for r in displayed]),
                      hide_index=True, width="stretch")
         if st.button(f"🗑️ Placer les {len(duplicates)} doublons dans la corbeille"):
-            delete_some(set(duplicates))
+            delete_some(duplicate_set)
             st.rerun()
     st.divider()
     st.markdown("#### Formats de données")
@@ -474,6 +499,18 @@ elif page == "🧹 Qualité":
 
 elif page == "📦 Exporter":
     st.subheader("Exporter ton dataset")
+    if "merge_report" in st.session_state:
+        report = st.session_state.merge_report
+        if "export_chatml" in st.session_state:
+            st.success(f"Fusion terminée : {report['conversations_exportees']} conversations prêtes pour Unsloth. "
+                       "Le JSONL est disponible ci-dessous.")
+        with st.expander("Bilan de la fusion"):
+            st.dataframe(pd.DataFrame(report["fichiers"]), hide_index=True, width="stretch")
+            st.write(f"Doublons écartés : {report['doublons_ecartes']} · "
+                     f"Entrées incompatibles écartées : {report['incompatibles_ecartees']} · "
+                     f"Entrées converties : {report.get('conversions_automatiques', 0)}")
+            st.download_button("Télécharger le bilan de fusion", json.dumps(report, ensure_ascii=False, indent=2),
+                               file_name="fusion_bilan.json", mime="application/json")
     st.write("**Aucun export ne modifie le dataset d'origine.** Les entrées de la corbeille"
              " sont exclues des fichiers d'entraînement.")
     base = Path(st.session_state.dataset_name).stem.replace(".rpwork", "") or "dataset"
@@ -505,10 +542,11 @@ elif page == "📦 Exporter":
     st.divider()
     with st.container(border=True):
         st.markdown("#### 3. Projet modifiable (.rpwork.json)")
-        st.write("Sauvegarde aussi la corbeille et tes annotations de langue."
+        st.write("Sauvegarde aussi la corbeille, tes annotations de langue et les fichiers sources des conversations."
                  " Réimporte ce fichier dans l'application pour poursuivre plus tard.")
         if st.button("Préparer la sauvegarde du projet"):
-            st.session_state.export_project_data = export_project(rows, st.session_state.dataset_name)
+            st.session_state.export_project_data = export_project(
+                rows, st.session_state.dataset_name, st.session_state.get("entry_sources", {}))
         if "export_project_data" in st.session_state:
             st.download_button("💾 Télécharger la sauvegarde complète",
                                st.session_state.export_project_data,
@@ -585,6 +623,11 @@ else:
 Les conversations sous `messages`, `conversations` (ShareGPT), `instruction/output`
 (Alpaca) et `prompt/completion` sont reconnues.
 
+**Fusion** : ouvre « 🧩 Fusionner », sélectionne plusieurs fichiers ou indique leurs chemins,
+puis analyse le bilan. La fusion peut écarter les doublons et les conversions incomplètes,
+et mélanger les conversations. Le JSONL Unsloth est préparé dans Exporter ; les entrées
+écartées restent dans la corbeille. Sauvegarde le projet pour les conserver.
+
 **Filtre** : `romance ; bataille` conserve les entrées contenant *au moins un*
 de ces termes. Le filtre « exclure » rejette toute entrée contenant un terme interdit.
 Les expressions régulières sont facultatives, sans distinction majuscule/minuscule.
@@ -592,6 +635,11 @@ Les expressions régulières sont facultatives, sans distinction majuscule/minus
 **Langues** : utilise les métadonnées de langue existantes ou l'onglet Qualité pour détecter
 le français, l'anglais, l'espagnol et d'autres langues localement. Une détection automatique
 reste indicative ; vérifie les cas ambigus.
+
+**Conversion des incompatibles** : dans Qualité, analyse les entrées incompatibles et applique
+les conversions récupérables. Coche « Inclure les entrées de la corbeille » pour récupérer
+des conversations écartées pendant une fusion. Les conversions sont annulables ; exporte
+ensuite le JSONL Unsloth. La fusion peut aussi appliquer ces conversions automatiquement.
 
 **Suppression** : les cases sélectionnent uniquement les entrées de la page affichée.
 « Supprimer tous les résultats filtrés » applique le filtre à l'ensemble du fichier.
