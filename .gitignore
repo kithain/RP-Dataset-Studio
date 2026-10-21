@@ -1,0 +1,40 @@
+# Python et environnements locaux
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Configuration et secrets locaux
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.codex/
+.agents/
+.idea/
+.vscode/
+
+# Datasets et exports personnels (les exemples sont versionnes)
+*.rpwork.json
+*.jsonl
+*.json
+*.csv
+*.tsv
+*.parquet
+*.zip
+!examples/
+!examples/**
+data/
+dataset/
+datasets/
+exports/
+
+# Fichiers temporaires
+*.log
+*.tmp
+.test-tmp/
+.DS_Store
+Thumbs.db
