@@ -25,7 +25,7 @@ from core import (Entry, LANG_CODES, apply_filters, as_messages, content_text,
                   conversation_fields, update_conversation_text,
                   counts_by_language, delete_ids, duplicate_ids, effective_language,
                   export_jsonl, export_project, label, load_dataset, message_count,
-                  preview, restore_ids, text_for_language)
+                  preview, purge_deleted, restore_ids, text_for_language)
 
 st.set_page_config(page_title="RP Dataset Studio", page_icon="🎭", layout="wide",
                    initial_sidebar_state="expanded")
@@ -71,7 +71,7 @@ def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | N
     st.session_state.pop("merge_report", None)
     st.session_state.entry_sources = dict(entry_sources or {})
     for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice", "tagging_errors",
-                "tag_manager_notice"):
+                "tag_manager_notice", "purge_notice"):
         st.session_state.pop(key, None)
 
 
@@ -88,6 +88,28 @@ def delete_some(ids: set[int]):
     if changed:
         mutation({"kind": "delete", "ids": changed})
     return len(changed)
+
+
+def empty_trash():
+    removed_ids = purge_deleted(st.session_state.rows)
+    if not removed_ids:
+        return
+    clear_exports()
+    # Undo snapshots and conversion previews may retain full copies of deleted records.
+    st.session_state.history = []
+    for key in ("conversion_preview", "conversion_signature", "conversion_notice",
+                "merge_analysis", "merge_signature"):
+        st.session_state.pop(key, None)
+    st.session_state.entry_sources = {uid: source for uid, source in
+        st.session_state.get("entry_sources", {}).items() if uid not in removed_ids}
+    st.session_state.tagging_errors = [(uid, message) for uid, message in
+        st.session_state.get("tagging_errors", []) if uid not in removed_ids]
+    st.session_state.revision += 1
+    st.session_state.filter_revision = st.session_state.get("filter_revision", 0) + 1
+    st.session_state.explorer_page = 1
+    st.session_state.purge_notice = (
+        f"{len(removed_ids)} entrée(s) retirée(s) définitivement du projet en mémoire. "
+        "L'historique d'annulation a été effacé. Sauvegarde le projet pour conserver cette purge.")
 
 
 def undo():
@@ -339,7 +361,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.06a")
+    st.caption("Gestion locale de datasets JDR · v0.07a")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
@@ -623,8 +645,10 @@ elif page == "📦 Exporter":
 
 elif page == "🗑️ Corbeille":
     st.subheader("Corbeille")
-    st.write("Les conversations restent dans le projet jusqu'à la création d'un export nettoyé."
-             " Tu peux les restaurer individuellement ou toutes à la fois.")
+    st.write("Les entrées de la corbeille sont exclues des exports JSONL, mais conservées dans le projet. "
+             "Tu peux les restaurer ou vider définitivement la corbeille.")
+    if "purge_notice" in st.session_state:
+        st.success(st.session_state.pop("purge_notice"))
     selected = row_table(removed, prefix="trash")
     a, b = st.columns(2)
     if a.button("Restaurer les entrées cochées", disabled=not selected):
@@ -637,6 +661,15 @@ elif page == "🗑️ Corbeille":
         if changed:
             mutation({"kind": "restore", "ids": changed})
         st.rerun()
+    with st.expander("Vider définitivement la corbeille"):
+        st.warning(f"Retire les {len(removed)} entrées de la corbeille du projet et efface tout "
+                   "l'historique d'annulation. Cette action est irréversible dans l'application. "
+                   "Les fichiers déjà présents sur le disque restent inchangés.")
+        confirm_purge = st.checkbox(f"Confirmer la purge définitive des {len(removed)} entrées",
+                                   key=f"confirm_purge_{st.session_state.revision}", disabled=not removed)
+        if st.button("Vider définitivement la corbeille", disabled=not removed or not confirm_purge):
+            empty_trash()
+            st.rerun()
     inspector(removed, prefix="trash")
 
 else:
@@ -672,6 +705,9 @@ NSFW ; ses suggestions peuvent contenir des erreurs. Needs Review signale une in
 Un échec conserve les annotations précédentes et affiche une erreur, sans basculer sur les règles.
 Les longs textes sont analysés en segments avec recouvrement. Le modèle reste en mémoire
 jusqu'au déchargement ou à la fermeture de l'application. Les noms et œuvres doivent être explicites.
+Pour reprendre une analyse sans tout recalculer : Qualité → « Analyser uniquement les entrées sans tags ».
+Seules les entrées actives sans tag sont analysées ; les tags existants et les listes vidées manuellement
+sont conservés. Le bouton se désactive quand il ne reste aucune entrée éligible.
 
 **Langues** : utilise les métadonnées de langue existantes ou l'onglet Qualité pour détecter
 le français, l'anglais, l'espagnol et d'autres langues localement. Une détection automatique
@@ -685,6 +721,9 @@ ensuite le JSONL Unsloth. La fusion peut aussi appliquer ces conversions automat
 **Suppression** : les cases sélectionnent uniquement les entrées de la page affichée.
 « Supprimer tous les résultats filtrés » applique le filtre à l'ensemble du fichier.
 Les suppressions sont réversibles via la corbeille ou le bouton Annuler.
+Dans Corbeille, « Vider définitivement la corbeille » retire ses entrées du projet après confirmation
+et efface tout l'historique d'annulation. Sauvegarde ensuite un nouveau projet pour conserver la purge.
+Les anciens fichiers sur disque ne sont pas modifiés.
 
 **Édition** : dans Explorer, choisis une entrée. « Lecture » affiche la conversation en entier,
 message par message. « Modifier les messages » permet d'éditer les textes sans écrire du JSON.

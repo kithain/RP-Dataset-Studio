@@ -12,6 +12,11 @@ def default_filters():
             "tag_mode": "all", "tag_status": "all"}
 
 
+def untagged_entries(rows):
+    """Retry unannotated active records without overriding intentional manual clears."""
+    return [row for row in rows if not row.deleted and row.tags_override is None and not entry_tags(row)]
+
+
 def tag_family(tag):
     if tag.casefold() in {"sfw", "nsfw", "needs review"}:
         return "Classification"

@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from tagging import TAG_RULES, entry_tags, normalize_tags
-from tag_management import tag_catalogue
+from tag_management import tag_catalogue, untagged_entries
 from qwen_ui import analyze_tags, annotate_rows
 from llm_tagging import QwenError
 
@@ -61,6 +61,22 @@ def render_tag_editor(entry, mutation, *, prefix):
                    "L'export Unsloth contient uniquement les messages.")
 
 
+def analyze_tag_batch(targets, mutation):
+    with st.spinner(f"Analyse locale de {len(targets)} entrées..."):
+        before, errors = annotate_rows(targets)
+    if before:
+        originals = {uid: tags for uid, tags in before}
+        mutation({"kind": "tags", "before": [(row.uid, originals[row.uid], row.tags_override)
+                                              for row in targets if row.uid in originals]})
+    st.session_state.tagging_notice = (
+        f"Lot de {len(targets)} entrées · {len(before)} annotations automatiques actualisées. "
+        "Les corrections manuelles sont conservées. L'action est annulable.")
+    target_ids = {row.uid for row in targets}
+    st.session_state.tagging_errors = [(uid, message) for uid, message in
+        st.session_state.get("tagging_errors", []) if uid not in target_ids] + errors
+    st.rerun()
+
+
 def render_tag_panel(rows, mutation):
     st.markdown("#### 🏷️ Tags automatiques")
     st.write(TAG_HELP)
@@ -69,18 +85,16 @@ def render_tag_panel(rows, mutation):
     live = [row for row in rows if not row.deleted]
     if "tagging_notice" in st.session_state:
         st.success(st.session_state.pop("tagging_notice"))
-    if st.button("Détecter / actualiser les tags", disabled=not live):
-        with st.spinner("Analyse locale des conversations et fiches..."):
-            before, errors = annotate_rows(live)
-        if before:
-            originals = {uid: tags for uid, tags in before}
-            mutation({"kind": "tags", "before": [(row.uid, originals[row.uid], row.tags_override)
-                                                  for row in live if row.uid in originals]})
-        st.session_state.tagging_notice = (
-            f"Lot de {len(live)} entrées · {len(before)} annotations automatiques actualisées. "
-            "Les corrections manuelles sont conservées. L'action est annulable.")
-        st.session_state.tagging_errors = errors
-        st.rerun()
+    missing = untagged_entries(live)
+    st.caption(f"{len(missing)} entrée(s) sans tags à analyser. "
+               "La passe ciblée ignore les entrées déjà taguées et la corbeille. "
+               "Les listes vidées manuellement restent protégées ; pour les réexaminer, utilise "
+               "« Utiliser les tags automatiques » dans l'inspecteur d'Explorer.")
+    a, b = st.columns(2)
+    if a.button("Analyser uniquement les entrées sans tags", disabled=not missing):
+        analyze_tag_batch(missing, mutation)
+    if b.button("Détecter / actualiser les tags", disabled=not live):
+        analyze_tag_batch(live, mutation)
     catalogue = tag_catalogue(live)
     st.caption(f"{sum(bool(entry_tags(row)) for row in live)} / {len(live)} entrées avec des tags. "
                "Le catalogue 🏷️ Tags permet de rechercher, filtrer et corriger par lot. "

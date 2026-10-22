@@ -538,6 +538,14 @@ def delete_ids(rows: list[Entry], ids: set[int]) -> list[int]:
     return changed
 
 
+def purge_deleted(rows: list[Entry]) -> set[int]:
+    """Permanently remove deleted rows in place, retaining surviving IDs and order."""
+    removed = {row.uid for row in rows if row.deleted}
+    if removed:
+        rows[:] = [row for row in rows if not row.deleted]
+    return removed
+
+
 def restore_ids(rows: list[Entry], ids: set[int]) -> list[int]:
     changed = []
     for row in rows:
