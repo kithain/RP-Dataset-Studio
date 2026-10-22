@@ -3,10 +3,17 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.07a (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.07b (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.07b
+
+- **Correction du rechargement après mise à jour** : une session Streamlit déjà ouverte peut conserver un ancien module `core` et afficher `ImportError: cannot import name 'purge_deleted'`. Avant les imports de l'interface, l'application vérifie les fonctions et paramètres nécessaires et recharge uniquement les modules locaux incompatibles, dans l'ordre de leurs dépendances. Les modules déjà compatibles et les ressources Qwen restent en place.
+- **Reprise de la session** : après cette erreur, cliquer sur « Rerun » / « Relancer » dans Streamlit. Le correctif conserve le dataset en mémoire, les filtres, la provenance et l'historique ; il ne redémarre pas le serveur et ne vide pas les caches de modèle. Il ne remplace pas des fichiers manquants ou une installation incomplète, qui restent signalés comme tels.
+
+**Validation : 150 tests automatisés réussis**, dont 4 nouveaux tests du rechargement des modules. Un processus Python isolé reproduit les fonctions et paramètres absents des anciens modules, relance l'interface et vérifie que les entrées existantes, leur provenance, l'historique et la ressource Qwen sont conservés ; la passe ciblée reste utilisable. Les 4 nouveaux tests passent aussi avec le Python portable. Aucune inférence réelle ni interruption du serveur de l'utilisateur n'est nécessaire à ces tests.
 
 ## Changements de la version 0.07a
 
@@ -112,6 +119,8 @@ Cette version ajoute la fusion de datasets et la conversion des conversations r�
 4. Laisser la console ouverte pendant l'utilisation. Pour fermer, presser `Ctrl+C` dans cette console.
 
 L'application peut ensuite fonctionner hors ligne. Pour déplacer l'installation, fermer l'application et copier **tout le dossier, y compris `.models/`, `.runtimes/` et `qwen_settings.json`**. Les chemins créés automatiquement restent valides après déplacement ; des chemins externes personnalisés doivent rester accessibles ou être corrigés. Relancer `install.bat` réutilise les fichiers valides ; si un téléchargement est interrompu, relancer l'installation. Pour forcer le moteur CPU : `install.bat -CpuOnly`.
+
+Après une mise à jour pendant que l'interface est ouverte, utiliser « Rerun » / « Relancer » si Streamlit affiche une erreur d'import d'une fonction nouvellement ajoutée. Depuis la version 0.07b, les modules locaux incompatibles sont rechargés en conservant la session ouverte. Sauvegarder régulièrement le projet reste nécessaire pour conserver le travail en cas de fermeture du serveur.
 
 Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le dossier et exécuter son contenu après vérification.
 

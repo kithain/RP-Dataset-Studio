@@ -12,6 +12,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from runtime_imports import refresh_cached_modules
+
+# A running Streamlit process can retain pre-update modules after app.py changes.
+refresh_cached_modules()
+
 from split_export import export_split_zip
 from merge_ui import render_merge_page
 from conversion_ui import render_conversion_panel
@@ -361,7 +366,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.07a")
+    st.caption("Gestion locale de datasets JDR · v0.07b")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
