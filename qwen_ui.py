@@ -8,7 +8,7 @@ import streamlit as st
 
 from llm_tagging import (BASE, DEFAULT_COMFY, DEFAULT_FP8, DEFAULT_GGUF, DEFAULT_PYTHON,
                          DEFAULT_SERVER, LocalQwen, QwenConfig, QwenError, analyze_record,
-                         tag_with_qwen)
+                         generate_json, tag_with_qwen)
 from tagging import detect_tags, tag_entries
 from install_assets import resolve_setting
 
@@ -124,6 +124,15 @@ def analyze_tags(data):
         return detect_tags(data)
     config = current_config()
     return analyze_record(data, lambda system, prompt: clients().generate(config, system, prompt))
+
+
+def generate_book(system, prompt, *, schema, max_tokens):
+    if st.session_state.get("tagging_engine", QWEN_2B) == RULES:
+        raise QwenError("Choisis Qwen 2B ou 4B dans la barre latérale pour générer le dataset.")
+    pool = clients()
+    with pool.lock:
+        return generate_json(pool.get(current_config()), system, prompt,
+                             schema=schema, max_tokens=max_tokens)
 
 
 def annotate_rows(rows):

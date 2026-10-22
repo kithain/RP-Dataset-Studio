@@ -216,25 +216,40 @@ class LocalQwen:
                 raise QwenUnavailable(str(exc)) from exc
 
     def generate(self, system: str, prompt: str) -> str:
-        with self._lock:
-            self.load()
-            try:
-                if self.config.backend == "comfy":
-                    return self._request({"op": "generate", "system": system, "prompt": prompt})["text"]
-                result = self._json_http("/v1/chat/completions", {
-                    "model": "local", "messages": [{"role": "system", "content": system},
-                                                      {"role": "user", "content": prompt}],
-                    "temperature": 0, "max_tokens": 512,
-                    "chat_template_kwargs": {"enable_thinking": False},
-                    "response_format": {"type": "json_schema", "json_schema": {
-                        "name": "tags", "strict": True, "schema": RESULT_SCHEMA}}})
-                choice = result["choices"][0]
-                if choice.get("finish_reason") == "length":
-                    raise QwenError("Réponse Qwen tronquée ; annotations précédentes conservées.")
-                return choice["message"]["content"]
-            except Exception as exc:
-                self.close()
-                raise QwenUnavailable(f"Analyse Qwen impossible : {exc}") from exc
+        return generate_json(self, system, prompt, schema=RESULT_SCHEMA, max_tokens=512)
+
+
+def generate_json(client, system: str, prompt: str, *, schema: dict,
+                  max_tokens: int = 1536) -> str:
+    """Share the managed runtime while allowing each task its own JSON contract.
+
+    This module-level API also works with a client cached before an app update.
+    """
+    if type(max_tokens) is not int or not 1 <= max_tokens <= 2048:
+        raise ValueError("Budget de génération invalide (1 à 2048 tokens).")
+    with client._lock:
+        client.load()
+        try:
+            if client.config.backend == "comfy":
+                result = client._request({"op": "generate_json", "system": system,
+                                          "prompt": prompt, "max_tokens": max_tokens})
+                if result.get("truncated"):
+                    raise QwenError("Réponse Qwen tronquée ; résultat non enregistré.")
+                return result["text"]
+            result = client._json_http("/v1/chat/completions", {
+                "model": "local", "messages": [{"role": "system", "content": system},
+                                                  {"role": "user", "content": prompt}],
+                "temperature": 0, "max_tokens": max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {"type": "json_schema", "json_schema": {
+                    "name": "result", "strict": True, "schema": schema}}})
+            choice = result["choices"][0]
+            if choice.get("finish_reason") != "stop":
+                raise QwenError("Réponse Qwen incomplète ; résultat non enregistré.")
+            return choice["message"]["content"]
+        except Exception as exc:
+            client.close()
+            raise QwenUnavailable(f"Génération Qwen impossible : {exc}") from exc
 
 
 def record_text(data: dict) -> str:

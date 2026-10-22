@@ -44,6 +44,7 @@ import tagging
 import tag_management
 import tagging_ui
 import qwen_ui
+import llm_tagging
 
 row = core.Entry(11, {"text": "Romance"}, 4)
 pool = qwen_ui.clients()
@@ -54,6 +55,8 @@ tagging.normalize_tags = legacy_normalize
 del core.purge_deleted
 del tag_management.untagged_entries
 del tagging_ui.analyze_tag_batch
+del llm_tagging.generate_json
+del qwen_ui.generate_book
 
 app = AppTest.from_file(str(Path("app.py").resolve()), default_timeout=30)
 app.session_state.rows = [row]
@@ -66,6 +69,8 @@ assert not app.exception, app.exception
 assert callable(core.purge_deleted)
 assert callable(tag_management.untagged_entries)
 assert callable(tagging_ui.analyze_tag_batch)
+assert callable(llm_tagging.generate_json)
+assert callable(qwen_ui.generate_book)
 assert "resolve_classification" in __import__("inspect").signature(tagging.normalize_tags).parameters
 assert app.session_state.rows[0] is row
 assert app.session_state.history == [{"kind": "lang", "before": [(11, None)]}]

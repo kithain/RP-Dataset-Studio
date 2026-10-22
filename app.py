@@ -19,6 +19,7 @@ refresh_cached_modules()
 
 from split_export import export_split_zip
 from merge_ui import render_merge_page
+from book_ui import render_book_page
 from conversion_ui import render_conversion_panel
 from tagging import entry_tags
 from tagging_ui import render_tag_editor, render_tag_panel
@@ -366,7 +367,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.07c")
+    st.caption("Gestion locale de datasets JDR · v0.08a")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
@@ -400,7 +401,7 @@ with st.sidebar:
                      use_container_width=True):
             undo()
             st.rerun()
-    page = st.radio("Navigation", ["🔎 Explorer", "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
+    page = st.radio("Navigation", ["🔎 Explorer", "📖 Depuis un livre", "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
                     key="navigation_page", label_visibility="collapsed")
     st.divider()
     st.caption("🔒 Fichiers traités localement. Aucune donnée envoyée à un service externe."
@@ -408,6 +409,10 @@ with st.sidebar:
 
 if page == "🧩 Fusionner":
     render_merge_page(loaded)
+    st.stop()
+
+if page == "📖 Depuis un livre":
+    render_book_page(loaded)
     st.stop()
 
 if not st.session_state.dataset_name:
@@ -420,7 +425,8 @@ if not st.session_state.dataset_name:
     c.info("**3. Exporte**\n\nOriginal filtré · ChatML · projet")
     st.subheader("Commencer")
     st.write("Utilise la colonne de gauche pour charger un dataset, ou clique sur « Charger le dataset de démonstration ». "
-             "Pour rassembler plusieurs fichiers, ouvre « 🧩 Fusionner ».")
+             "Pour rassembler plusieurs fichiers, ouvre « 🧩 Fusionner ». "
+             "Pour créer des exemples RP et narration depuis un TXT, ouvre « 📖 Depuis un livre ».")
     st.stop()
 
 live = [r for r in rows if not r.deleted]
@@ -688,6 +694,15 @@ Les conversations sous `messages`, `conversations` (ShareGPT), `instruction/outp
 puis analyse le bilan. La fusion peut écarter les doublons et les conversions incomplètes,
 et mélanger les conversations. Le JSONL Unsloth est préparé dans Exporter ; les entrées
 écartées restent dans la corbeille. Sauvegarde le projet pour les conserver.
+
+**Livre TXT** : ouvre « 📖 Depuis un livre », sélectionne ton fichier et les exemples RP et/ou
+narration, puis prépare le livre. Génère un aperçu avant de lancer tout le livre. Les réponses
+d'entraînement conservent le texte original ; Qwen sélectionne les dialogues RP et rédige les
+consignes de narration. Vérifie les rôles et les consignes. La progression est sauvegardée dans
+`data/book_generation/` et retrouvée avec le même livre et les mêmes réglages. Ouvre les exemples
+dans l'éditeur pour les corriger, puis sauvegarde un projet : les corrections de l'éditeur ne
+modifient pas la progression du générateur. Le TXT reste intact et l'export Unsloth contient
+seulement les messages. Qwen 2B ou 4B est nécessaire ; les règles sans LLM ne génèrent pas d'exemples.
 
 **Filtre** : `romance ; bataille` conserve les entrées contenant *au moins un*
 de ces termes. Le filtre « exclure » rejette toute entrée contenant un terme interdit.

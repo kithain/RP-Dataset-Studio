@@ -34,16 +34,20 @@ def main():
                                           disable_dynamic=True)
             if request.get("op") == "load":
                 result = {"device": str(clip.patcher.load_device), "model": Path(args.model).name}
-            elif request.get("op") == "generate":
+            elif request.get("op") in ("generate", "generate_json"):
                 tokens = clip.tokenize(request["prompt"], system_prompt=request["system"],
                                        thinking=False, min_length=1)
                 count = sum(len(batch) for batches in tokens.values() for batch in batches)
-                if count > 8192:
-                    raise ValueError(f"Contexte trop long : {count} tokens (maximum 8192).")
+                budget = request.get("max_tokens", 512)
+                if type(budget) is not int or not 1 <= budget <= 2048:
+                    raise ValueError("Budget de génération invalide.")
+                if count + budget > 8192:
+                    raise ValueError(f"Contexte trop long : {count} tokens + {budget} en sortie (maximum 8192).")
                 with torch.inference_mode():
-                    ids = clip.generate(tokens, do_sample=False, max_length=512,
+                    ids = clip.generate(tokens, do_sample=False, max_length=budget,
                                         repetition_penalty=1.05, seed=42, mtp=False)
-                result = {"text": clip.decode(ids), "input_tokens": count}
+                result = {"text": clip.decode(ids), "input_tokens": count,
+                          "truncated": len(ids) >= budget}
             else:
                 raise ValueError("Opération inconnue")
             response = {"ok": True, **result}

@@ -3,10 +3,21 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.07c (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.08a (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.08a
+
+- **Nouvelle page « 📖 Depuis un livre »** : importe un livre `.txt` ou ouvre son chemin local, puis choisis « RP et personnages », « Narration et style » ou les deux. Le découpage préfère les paragraphes et fins de phrases, sans perdre de caractères. La taille maximale est réglable de 800 à 4 000 caractères, avec 2 400 par défaut. UTF-8, UTF-16 et Windows-1252 sont proposés explicitement ; un texte illisible n'est pas réparé en supprimant des caractères.
+- **RP tiré des dialogues originaux** : Qwen identifie un personnage et sélectionne de deux à six messages alternés. Le programme vérifie la présence du nom, le texte exact des répliques et leur ordre dans le passage. Certaines incises françaises explicites, comme « répondit Lina », permettent aussi de rejeter une attribution contradictoire ; les attributions implicites restent à relire. Une réponse invalide fait l'objet d'un seul essai de réparation avec l'erreur de validation. Le contexte vient uniquement du texte précédant le premier échange ; aucune biographie générée n'est ajoutée. Les passages sans interaction exploitable peuvent être écartés avec un motif.
+- **Narration et style conservés** : Qwen rédige une consigne d'écriture ; la réponse est le passage original, avec sa ponctuation et sa mise en forme après normalisation des fins de ligne. Le petit modèle ne réécrit pas le texte destiné à l'entraînement. La consigne et l'attribution des voix restent à relire : la validation structurelle ne garantit pas leur justesse.
+- **Aperçu puis génération complète avec reprise** : le premier bouton traite un petit lot, le second poursuit les tâches restantes. Chaque résultat est sauvegardé dans `data/book_generation/`, exclu de Git. Préparer à nouveau le même fichier avec les mêmes réglages retrouve les réussites, les exclusions et les erreurs à réessayer. Une erreur de moteur arrête la passe ; une réponse invalide reste en attente. Les doublons sont écartés et les passages de moins de 80 caractères sont signalés. La reprise dépend aussi du titre, du nom du fichier, du modèle et des types d'exemples choisis.
+- **Relecture et exports** : chaque exemple conserve le passage, ses positions dans le texte normalisé, son empreinte SHA-256, le modèle et le type de préparation. Tous portent `Needs Review`. Télécharge le JSONL Unsloth (`messages` seulement), le JSONL avec les sources ou le projet `.rpwork.json`, ou ouvre les exemples dans l'éditeur pour corriger les consignes et rôles. Le fichier TXT reste intact. Les tags sémantiques peuvent être calculés ensuite depuis Qualité ; la génération n'ajoute pas une seconde passe de modèle pour les tags.
+- **Moteurs locaux 2B et 4B** : schémas de sortie adaptés à la tâche et budgets distincts de ceux des tags. Le moteur 4B réserve la place de sortie dans le contexte et signale une génération tronquée. Le mode « Règles rapides » ne peut pas générer un dataset. Les nouveaux points d'entrée sont récupérés lors d'une mise à jour d'une session Streamlit existante.
+
+**Validation : 182 tests automatisés réussis**, dont 19 tests du générateur : encodages, conservation du texte, extraction exacte, ordre des répliques, attribution explicitement contradictoire, réparation limitée à un essai, erreurs, doublons, sauvegarde atomique, reprise après interruption, contrôle des sources et parcours d'interface. Les 19 tests passent aussi avec le Python portable. Un essai réel sur une courte scène française de contrôle produit un exemple RP et un exemple de narration avec chacun des modèles locaux 2B et 4B ; les réponses d'entraînement proviennent du texte. Le parcours 2B a également été vérifié dans le navigateur. Ces essais ne mesurent pas la qualité générale sur un livre entier.
 
 ## Changements de la version 0.07c
 
@@ -137,6 +148,7 @@ Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le d
 
 ## Utilisation
 
+- **Créer depuis un livre** : ouvrir « 📖 Depuis un livre » (même sans dataset ouvert), sélectionner un TXT ou son chemin local, conserver les deux types d'exemples ou en choisir un seul, puis cliquer sur « Préparer le livre / reprendre la sauvegarde ». Choisir Qwen 2B ou 4B dans la barre latérale. Utiliser « Générer un aperçu », vérifier les rôles, la consigne et le passage source, puis « Générer tout le livre / reprendre ». La progression locale est enregistrée après chaque résultat ; après fermeture, préparer le même livre avec les mêmes réglages la restaure. Pour recommencer, cocher l'option correspondante dans « Lecture et découpage » avant de préparer. Télécharger le projet pour corriger les exemples dans l'éditeur et conserver leurs sources ; le JSONL Unsloth n'exporte que les messages. Sauvegarder le dataset actuel avant d'ouvrir les exemples dans l'éditeur. Les modifications faites dans l'éditeur sont conservées dans le projet exporté, pas dans la progression du générateur.
 - **Importer** un fichier `.jsonl`, `.json`, `.csv`, `.tsv`, `.parquet` ou `.rpwork.json` depuis le panneau latéral.
 - **Fusionner** : ouvrir « 🧩 Fusionner », sélectionner plusieurs fichiers ou coller leurs chemins locaux (un par ligne), puis analyser le bilan. Par défaut, les doublons sont retirés entre tous les fichiers, les entrées incompatibles ou les conversions qui omettraient des messages/images/outils sont écartées et les conversations sont mélangées avec une graine reproductible. Le bouton de fusion ouvre le dataset dans l'éditeur et prépare un JSONL Unsloth dans Exporter. Les formats sources, métadonnées et entrées écartées restent dans le projet ; sauvegarder un `.rpwork.json` pour les conserver. Les fichiers sources ne sont pas modifiés. Le bilan de fusion est téléchargeable séparément.
 - **Réparer à l'import** : la case « Réparer les erreurs JSONL simples », activée par défaut, sépare les objets JSON collés sur une ligne et retire les virgules superflues hors des chaînes de texte. Le bilan précise les lignes réparées ; les erreurs restantes sont signalées. Décoche la case avant de réimporter pour utiliser le mode strict. Exporte le JSONL au format original pour conserver une copie corrigée, sans écraser la source. Les contenus tronqués ou ambigus ne sont pas devinés.
@@ -192,6 +204,10 @@ Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exempl
 L'inférence et les textes restent locaux après cette installation. Le modèle reste chargé entre les analyses et consomme de la mémoire jusqu'au déchargement. Le classement NSFW a été testé sur des thèmes adultes déclarés, sans refus ; cela ne garantit ni l'absence de refus dans tous les cas ni des tags toujours exacts.
 
 ## Aperçus des nouvelles fonctions
+
+### Relecture d'un exemple RP extrait d'un livre TXT
+
+![Dialogue original sélectionné par Qwen, avec contexte et provenance consultable](livre_dataset.png)
 
 ### Préparation de la fusion
 
