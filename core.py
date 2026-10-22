@@ -450,12 +450,17 @@ def terms(raw: str) -> list[str]:
 def apply_filters(rows: list[Entry], *, languages: list[str] | None = None,
                   contains: str = "", excludes: str = "", use_regex: bool = False,
                   include_deleted: bool = False, only_unconvertible: bool = False,
-                  tags: list[str] | None = None, excluded_tags: list[str] | None = None) -> list[Entry]:
-    """OR for include terms; exclusion if ANY excluded term matches."""
+                  tags: list[str] | None = None, excluded_tags: list[str] | None = None,
+                  tag_mode: str = "all", tag_status: str = "all") -> list[Entry]:
+    """Exact tags (all/any), optional tag presence; OR for text include terms."""
+    if tag_mode not in {"all", "any"}:
+        raise ValueError("Mode de tags inconnu")
+    if tag_status not in {"all", "tagged", "untagged"}:
+        raise ValueError("État des tags inconnu")
     positive = terms(contains)
     negative = terms(excludes)
-    required = {tag.casefold() for tag in normalize_tags(tags)}
-    forbidden = {tag.casefold() for tag in normalize_tags(excluded_tags)}
+    required = {tag.casefold() for tag in normalize_tags(tags, resolve_classification=False)}
+    forbidden = {tag.casefold() for tag in normalize_tags(excluded_tags, resolve_classification=False)}
     if use_regex:
         yes = [re.compile(t, flags=re.IGNORECASE) for t in positive]
         no = [re.compile(t, flags=re.IGNORECASE) for t in negative]
@@ -472,7 +477,13 @@ def apply_filters(rows: list[Entry], *, languages: list[str] | None = None,
             continue
         row_tags = entry_tags(row)
         actual_tags = {tag.casefold() for tag in row_tags}
-        if not required.issubset(actual_tags) or forbidden.intersection(actual_tags):
+        if ((tag_status == "tagged" and not actual_tags)
+                or (tag_status == "untagged" and actual_tags)):
+            continue
+        if required and (not required.issubset(actual_tags) if tag_mode == "all"
+                         else not required.intersection(actual_tags)):
+            continue
+        if forbidden.intersection(actual_tags):
             continue
         if not yes and not no:
             matches.append(row)

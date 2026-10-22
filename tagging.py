@@ -89,7 +89,7 @@ _ALIASES.update({"sfw": "SFW", "nsfw": "NSFW", "comedie": "Comedy",
                  "tranche de vie": "Slice of Life", "manga": "Anime", "taquine": "Teasing"})
 
 
-def normalize_tags(value: Any) -> list[str]:
+def normalize_tags(value: Any, *, resolve_classification: bool = True) -> list[str]:
     """Read source tag strings/lists without treating dictionaries as labels."""
     if isinstance(value, str):
         try:
@@ -108,8 +108,8 @@ def normalize_tags(value: Any) -> list[str]:
         if tag and tag.casefold() not in seen:
             seen.add(tag.casefold())
             result.append(tag)
-    # A record must never be presented as both SFW and NSFW.
-    return [tag for tag in result if tag != "SFW" or "NSFW" not in result]
+    # A record cannot have both ratings; a search may explicitly request/exclude both.
+    return [tag for tag in result if not resolve_classification or tag != "SFW" or "NSFW" not in result]
 
 
 def _containers(data: dict) -> list[dict]:

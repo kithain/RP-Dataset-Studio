@@ -1,12 +1,11 @@
 """Tag review and editing controls shared by Explorer and Quality."""
 from __future__ import annotations
 
-from collections import Counter
-
 import pandas as pd
 import streamlit as st
 
 from tagging import TAG_RULES, entry_tags, normalize_tags
+from tag_management import tag_catalogue
 from qwen_ui import analyze_tags, annotate_rows
 from llm_tagging import QwenError
 
@@ -82,9 +81,10 @@ def render_tag_panel(rows, mutation):
             "Les corrections manuelles sont conservées. L'action est annulable.")
         st.session_state.tagging_errors = errors
         st.rerun()
-    counts = Counter(tag for row in live for tag in entry_tags(row))
+    catalogue = tag_catalogue(live)
     st.caption(f"{sum(bool(entry_tags(row)) for row in live)} / {len(live)} entrées avec des tags. "
-               "Pour les corriger, ouvre une entrée dans Explorer → Tags de cette entrée.")
-    if counts:
-        st.dataframe(pd.DataFrame(counts.most_common(40), columns=["Tag", "Entrées"]),
-                     hide_index=True, width="stretch", height=min(350, 36 * len(counts) + 40))
+               "Le catalogue 🏷️ Tags permet de rechercher, filtrer et corriger par lot. "
+               "Pour une seule entrée : Explorer → Tags de cette entrée.")
+    if catalogue:
+        st.dataframe(pd.DataFrame(catalogue[:40]),
+                     hide_index=True, width="stretch", height=min(350, 36 * len(catalogue) + 40))

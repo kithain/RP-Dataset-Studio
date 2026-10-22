@@ -17,6 +17,8 @@ from merge_ui import render_merge_page
 from conversion_ui import render_conversion_panel
 from tagging import entry_tags
 from tagging_ui import render_tag_editor, render_tag_panel
+from tag_management import default_filters
+from tag_browser_ui import render_filters, render_filtered_export, render_tag_browser
 from qwen_ui import analyze_tags, annotate_rows, render_qwen_settings, report_errors
 from llm_tagging import QwenError
 from core import (Entry, LANG_CODES, apply_filters, as_messages, content_text,
@@ -42,15 +44,14 @@ BASE = Path(__file__).resolve().parent
 
 def initialize():
     defaults = {"rows": [], "dataset_name": None, "errors": [], "repairs": [], "history": [],
-                "revision": 0, "filters": {"contains": "", "excludes": "",
-                "languages": [], "regex": False, "unconvertible": False}, "page": 1}
+                "revision": 0, "filters": default_filters(), "page": 1}
     for key, default in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default
 
 
 def clear_exports():
-    for key in ("export_original", "export_chatml", "export_project_data", "export_parts"):
+    for key in ("export_original", "export_chatml", "export_project_data", "export_parts", "export_filtered"):
         st.session_state.pop(key, None)
 
 
@@ -63,12 +64,14 @@ def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | N
     st.session_state.repairs = repairs or []
     st.session_state.history = []
     st.session_state.revision += 1
-    st.session_state.filters = {"contains": "", "excludes": "", "languages": [],
-                                "regex": False, "unconvertible": False}
+    st.session_state.filters = default_filters()
+    st.session_state.filter_revision = st.session_state.get("filter_revision", 0) + 1
+    st.session_state.explorer_page = 1
     st.session_state.page = 1
     st.session_state.pop("merge_report", None)
     st.session_state.entry_sources = dict(entry_sources or {})
-    for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice", "tagging_errors"):
+    for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice", "tagging_errors",
+                "tag_manager_notice"):
         st.session_state.pop(key, None)
 
 
@@ -336,7 +339,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.05a")
+    st.caption("Gestion locale de datasets JDR · v0.06a")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
@@ -370,7 +373,7 @@ with st.sidebar:
                      use_container_width=True):
             undo()
             st.rerun()
-    page = st.radio("Navigation", ["🔎 Explorer", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
+    page = st.radio("Navigation", ["🔎 Explorer", "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
                     key="navigation_page", label_visibility="collapsed")
     st.divider()
     st.caption("🔒 Fichiers traités localement. Aucune donnée envoyée à un service externe."
@@ -424,48 +427,19 @@ report_errors(st.session_state.get("tagging_errors", []))
 
 if page == "🔎 Explorer":
     st.subheader("Rechercher et filtrer")
-    available_langs = sorted({effective_language(r) for r in live}, key=lambda x: (x == "?", x))
-    available_tags = sorted({tag for row in live for tag in entry_tags(row)}, key=str.casefold)
-    current_filters = st.session_state.filters
-    with st.form("search_filters"):
-        col1, col2 = st.columns(2)
-        with col1:
-            contains = st.text_input("Mots à conserver (séparés par ; = OU)",
-                                     value=current_filters["contains"],
-                                     placeholder="nécromancien ; romance ; bataille")
-            languages = st.multiselect("Langues", options=available_langs,
-                                       default=[x for x in current_filters["languages"] if x in available_langs],
-                                       format_func=lambda k: f"{k} — {LANG_CODES.get(k, k)}")
-            tags = st.multiselect("Tags à conserver (tous requis)", options=available_tags,
-                                  default=[tag for tag in current_filters.get("tags", []) if tag in available_tags])
-        with col2:
-            excludes = st.text_input("Mots à exclure (séparés par ;)",
-                                     value=current_filters["excludes"],
-                                     placeholder="advertising ; spam")
-            regex = st.checkbox("Utiliser des expressions régulières", value=current_filters["regex"])
-            unconvertible = st.checkbox("Seulement les formats non convertibles",
-                                       value=current_filters["unconvertible"])
-            excluded_tags = st.multiselect("Tags à exclure (au moins un)", options=available_tags,
-                                           default=[tag for tag in current_filters.get("excluded_tags", [])
-                                                    if tag in available_tags])
-        submitted = st.form_submit_button("Appliquer les filtres", type="primary")
-        if submitted:
-            st.session_state.filters = {"contains": contains, "excludes": excludes,
-                                        "languages": languages, "regex": regex,
-                                        "unconvertible": unconvertible, "tags": tags,
-                                        "excluded_tags": excluded_tags}
-            st.session_state.explorer_page = 1
-            st.rerun()
+    render_filters(live)
     ff = st.session_state.filters
     try:
         filtered = apply_filters(rows, contains=ff["contains"], excludes=ff["excludes"],
                                  languages=ff["languages"], use_regex=ff["regex"],
                                  only_unconvertible=ff["unconvertible"], tags=ff.get("tags"),
-                                 excluded_tags=ff.get("excluded_tags"))
+                                 excluded_tags=ff.get("excluded_tags"),
+                                 tag_mode=ff.get("tag_mode", "all"), tag_status=ff.get("tag_status", "all"))
     except re.error as exc:
         st.error(f"Expression régulière invalide : {exc}")
         filtered = []
     st.write(f"**{len(filtered):,} résultat(s)** sur {len(live):,} actifs".replace(",", " "))
+    render_filtered_export(filtered)
     chosen = row_table(filtered, prefix="explorer")
     st.markdown("#### Actions sur les résultats")
     with st.container(border=True):
@@ -497,6 +471,9 @@ if page == "🔎 Explorer":
                 st.rerun()
     st.divider()
     inspector(filtered, prefix="explorer")
+
+elif page == "🏷️ Tags":
+    render_tag_browser(rows, mutation)
 
 elif page == "🧹 Qualité":
     st.subheader("Contrôle qualité")
@@ -679,8 +656,14 @@ de ces termes. Le filtre « exclure » rejette toute entrée contenant un terme 
 Les expressions régulières sont facultatives, sans distinction majuscule/minuscule.
 
 **Tags** : ajoutés automatiquement à l'import (désactivable) et pendant la fusion. Dans Qualité,
-« Détecter / actualiser les tags » analyse les entrées actives. Dans Explorer, conserve tous les
-tags choisis ou exclus toute entrée portant un tag exclu. L'inspecteur permet de corriger les tags
+« Détecter / actualiser les tags » analyse les entrées actives. Dans Explorer, choisis tous les
+tags requis (ET) ou au moins un (OU), puis exclus les tags indésirables. Les raccourcis SFW,
+NSFW, Needs Review et Sans tags remplacent les critères de tags. Le catalogue « 🏷️ Tags » permet
+de rechercher par nom ou famille, voir les fréquences, ouvrir un filtre et renommer/fusionner/retirer
+un tag par lot après aperçu et confirmation. Les tags correspondent à des noms exacts, sans
+distinction de casse. « Exporter uniquement les résultats filtrés » conserve le sous-ensemble
+sur toutes les pages en JSONL original avec tags ou ChatML. Les exports de la page Exporter
+continuent à concerner toutes les entrées actives. L'inspecteur permet de corriger les tags
 ou de revenir aux suggestions automatiques. Les corrections sont annulables et conservées
 dans les projets ; le JSONL d'origine reçoit un champ `tags`. ChatML conserve seulement les messages.
 Dans la barre latérale → Analyse des tags, choisis Qwen 2B Heretic (GGUF), Qwen 4B Heretic
