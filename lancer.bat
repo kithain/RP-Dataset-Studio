@@ -8,7 +8,5 @@ if not exist "%APP_PYTHON%" (
   pause
   exit /b 1
 )
-echo Ouverture locale : http://127.0.0.1:8501
-echo Pour fermer : CTRL+C dans cette fenetre.
-"%APP_PYTHON%" -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501 --server.headless false --server.maxUploadSize 1024 --browser.gatherUsageStats false
+"%APP_PYTHON%" launch_local.py
 if errorlevel 1 pause

@@ -3,10 +3,19 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.07b (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.07c (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.07c
+
+- **Redémarrage propre depuis `lancer.bat`** : chaque lancement ferme les anciennes instances identifiées de ce dossier et leurs sous-processus, puis démarre une nouvelle session Streamlit. Cela évite qu'une session fantôme conserve le port 8501. Les instances lancées avec les anciens Python locaux sont reconnues, ainsi que les nouvelles commandes utilisant le chemin absolu de `app.py`.
+- **Ouverture explicite du navigateur** : le lanceur attend une réponse valide du serveur local avant d'ouvrir l'interface. Une erreur au démarrage reste visible dans la console ; si le navigateur ne peut pas être ouvert, l'adresse locale est affichée. Le Python portable reste prioritaire, avec repli sur `.venv`.
+- **Processus ciblés** : les autres applications et projets sont préservés. Si le port reste occupé par un processus qui ne peut pas être identifié comme appartenant à ce dossier, le lanceur signale le conflit et s'arrête. Il ne réutilise pas l'ancienne session et ne tue pas un processus uniquement parce qu'il possède le port.
+- **Nouvelle session à chaque lancement** : sauvegarder le projet avant de relancer pour conserver le travail en mémoire. `Ctrl+C` arrête le serveur créé par le lanceur.
+
+**Validation : 163 tests automatisés réussis**, dont 13 nouveaux tests du lanceur : reconnaissance des processus du projet, fermeture de l'arbre, redémarrage après fermeture, conflits de port, démarrage en échec ou lent, interruption et ouverture du navigateur après disponibilité du serveur. Les 13 nouveaux tests passent aussi avec le Python portable. Un essai réel isolé avec ce Python, dans un dossier avec espaces et accent, confirme deux démarrages successifs sur un port de test : l'ancien PID serveur disparaît et un nouveau prend sa place. L'appel d'ouverture du navigateur y est intercepté, sans ouvrir de fenêtre pendant le test ; les processus de démonstration sont arrêtés à la fin.
 
 ## Changements de la version 0.07b
 
@@ -115,12 +124,14 @@ Cette version ajoute la fusion de datasets et la conversion des conversations r�
 
 1. Sur **Windows 10/11 x64 (Intel/AMD)**, dézipper le dossier complet dans un emplacement où tu peux écrire, par exemple `C:\RP-Dataset-Studio`.
 2. Double-cliquer sur **`install.bat`**. Il télécharge et vérifie Python portable, les dépendances de l'application, Qwen 2B Heretic et llama.cpp, puis configure et teste le modèle. Aucun Python système, ComfyUI ou compte Hugging Face n'est nécessaire. Le premier téléchargement représente environ **1,4 Go hors dépendances Python** ; une connexion Internet est nécessaire pendant cette installation.
-3. Attendre « Installation autonome terminée », puis double-cliquer sur **`lancer.bat`**. Le navigateur ouvre l'interface locale avec Qwen 2B sélectionné par défaut sur une installation neuve.
+3. Attendre « Installation autonome terminée », puis double-cliquer sur **`lancer.bat`**. Les anciennes instances de ce dossier sont fermées et une session neuve démarre ; le navigateur ouvre l'interface quand le serveur est prêt. Qwen 2B est sélectionné par défaut sur une installation neuve.
 4. Laisser la console ouverte pendant l'utilisation. Pour fermer, presser `Ctrl+C` dans cette console.
 
 L'application peut ensuite fonctionner hors ligne. Pour déplacer l'installation, fermer l'application et copier **tout le dossier, y compris `.models/`, `.runtimes/` et `qwen_settings.json`**. Les chemins créés automatiquement restent valides après déplacement ; des chemins externes personnalisés doivent rester accessibles ou être corrigés. Relancer `install.bat` réutilise les fichiers valides ; si un téléchargement est interrompu, relancer l'installation. Pour forcer le moteur CPU : `install.bat -CpuOnly`.
 
 Après une mise à jour pendant que l'interface est ouverte, utiliser « Rerun » / « Relancer » si Streamlit affiche une erreur d'import d'une fonction nouvellement ajoutée. Depuis la version 0.07b, les modules locaux incompatibles sont rechargés en conservant la session ouverte. Sauvegarder régulièrement le projet reste nécessaire pour conserver le travail en cas de fermeture du serveur.
+
+**Relancer `lancer.bat` redémarre complètement l'application**, y compris les anciennes sessions fantômes identifiées et leurs sous-processus. Pour garder le dataset en mémoire après une mise à jour du code, utiliser « Rerun » dans la page ; pour repartir d'une session propre, utiliser `lancer.bat` après sauvegarde du projet.
 
 Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le dossier et exécuter son contenu après vérification.
 
@@ -228,7 +239,7 @@ Dans un terminal ouvert dans le dossier :
 - `examples/exemple_rp.jsonl` : six conversations de démonstration, dont une en anglais et un doublon.
 - `examples/exemple_conversion.jsonl` : exemples de conversations récupérables et de cas à corriger manuellement.
 - `examples/exemple_tags.jsonl` : exemples de genres, fiches imbriquées, thèmes et négations pour les tags.
-- `install.bat` et `lancer.bat` : installation et lancement Windows.
+- `install.bat`, `lancer.bat` et `launch_local.py` : installation et redémarrage Windows, puis ouverture de l'interface.
 - `setup_windows.ps1`, `install_local.py` et `install_assets.py` : Python portable, téléchargements vérifiés, configuration et test du LLM autonome.
 - `tests/` : tests unitaires et scénarios d'interface Streamlit.
 - `COMPTE_RENDU_REVIEW.md` : revue de code, corrections et vérifications.
