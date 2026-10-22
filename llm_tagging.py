@@ -17,14 +17,15 @@ import urllib.error
 import urllib.request
 
 from tagging import TAG_RULES, _containers, _text_parts, _TEXT_KEYS, normalize_tags
+from install_assets import model_path, runtime_path
 
 
 BASE = Path(__file__).resolve().parent
-DEFAULT_GGUF = r"D:\I.A\GGUF\Qwen3.5-2B-Heretic-Q4_K_M.gguf"
+DEFAULT_GGUF = str(model_path(BASE))
 DEFAULT_COMFY = r"D:\I.A\ComfyUI_windows_portable\ComfyUI"
 DEFAULT_FP8 = str(Path(DEFAULT_COMFY) / "models/text_encoders/Qwen3.5-4B-heretic-fp8.safetensors")
 DEFAULT_PYTHON = str(Path(DEFAULT_COMFY).parent / "python_embeded/python.exe")
-DEFAULT_SERVER = str(BASE / ".runtimes/llama-b11819-vulkan/llama-server.exe")
+DEFAULT_SERVER = str(runtime_path(BASE) / "llama-server.exe")
 
 SYSTEM_PROMPT = """You are a precise metadata classifier for roleplay datasets, in any language.
 Analyze narrative meaning, tone and relationships, including implicit genres. Return ONLY JSON:

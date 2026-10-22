@@ -3,10 +3,22 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.04a (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.05a (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.05a
+
+**Installation autonome Windows x64** : `install.bat` récupère maintenant tout le nécessaire dans le dossier de l'application, sans Python système, ComfyUI ni installation manuelle du LLM.
+
+- **Python portable 3.12.15**, fourni par [Python Build Standalone d'Astral](https://github.com/astral-sh/python-build-standalone/releases/tag/20261013), puis installation des dépendances dans ce Python local.
+- **Téléchargement automatique de Qwen3.5-2B Heretic Q4_K_M et de llama.cpp**, avec versions figées, taille attendue et SHA-256 vérifiés avant utilisation. Le moteur Vulkan est testé et un moteur CPU est installé automatiquement si le test échoue ; `install.bat -CpuOnly` permet de choisir directement le CPU.
+- **Test réel d'inférence avant confirmation** : l'installation n'est déclarée terminée qu'après une réponse JSON valide de Qwen. Les erreurs conservent les fichiers existants et retournent un code d'échec.
+- **Dossier transportable** : modèle dans `.models/`, Python, moteur et DLL Visual C++ nécessaires dans `.runtimes/`, configuration avec chemins relatifs. Les chemins gérés sont actualisés en cas de repli CPU ; les chemins personnalisés externes restent conservés. Le lanceur utilise le Python portable en priorité, avec compatibilité avec l'ancien `.venv`.
+- **Réinstallation** : les téléchargements déjà valides et les bibliothèques du moteur sont vérifiés puis réutilisés. Une DLL manquante est restaurée depuis l'archive locale si elle est disponible. Les téléchargements Qwen/moteur sont retentés jusqu'à trois fois en cas d'erreur.
+
+**Validation : 127 tests réussis**, dans le `.venv` de développement et séparément avec le Python portable et les dépendances nouvellement installées. Une installation réelle a été réalisée dans un dossier neuf avec espaces et accents et sans Python dans le `PATH`, puis le dossier a été déplacé. La réinstallation avec accès réseau bloqué, le chargement de Qwen depuis l'interface déplacée et une installation forcée CPU avec inférence réelle ont réussi. Les trois DLL MSVC ont été vérifiées comme chargées depuis le dossier local du moteur.
 
 ## Changements de la version 0.04a
 
@@ -72,11 +84,12 @@ Cette version ajoute la fusion de datasets et la conversion des conversations r�
 
 ## Installation Windows
 
-1. Installer [Python 3.11 ou 3.12](https://www.python.org/downloads/windows/) si nécessaire (cocher « Add Python to PATH »).
-2. Dézipper ce dossier à un emplacement simple, par exemple `C:\RP-Dataset-Studio`.
-3. Double-cliquer sur **`install.bat`**. Cette opération télécharge Streamlit, pandas, pyarrow et Lingua depuis PyPI ; une connexion Internet est nécessaire une seule fois.
-4. Double-cliquer sur **`lancer.bat`**. Le navigateur ouvre une interface locale.
-5. Laisser la console ouverte pendant l'utilisation. Pour fermer, presser `Ctrl+C` dans cette console.
+1. Sur **Windows 10/11 x64 (Intel/AMD)**, dézipper le dossier complet dans un emplacement où tu peux écrire, par exemple `C:\RP-Dataset-Studio`.
+2. Double-cliquer sur **`install.bat`**. Il télécharge et vérifie Python portable, les dépendances de l'application, Qwen 2B Heretic et llama.cpp, puis configure et teste le modèle. Aucun Python système, ComfyUI ou compte Hugging Face n'est nécessaire. Le premier téléchargement représente environ **1,4 Go hors dépendances Python** ; une connexion Internet est nécessaire pendant cette installation.
+3. Attendre « Installation autonome terminée », puis double-cliquer sur **`lancer.bat`**. Le navigateur ouvre l'interface locale avec Qwen 2B sélectionné par défaut sur une installation neuve.
+4. Laisser la console ouverte pendant l'utilisation. Pour fermer, presser `Ctrl+C` dans cette console.
+
+L'application peut ensuite fonctionner hors ligne. Pour déplacer l'installation, fermer l'application et copier **tout le dossier, y compris `.models/`, `.runtimes/` et `qwen_settings.json`**. Les chemins créés automatiquement restent valides après déplacement ; des chemins externes personnalisés doivent rester accessibles ou être corrigés. Relancer `install.bat` réutilise les fichiers valides ; si un téléchargement est interrompu, relancer l'installation. Pour forcer le moteur CPU : `install.bat -CpuOnly`.
 
 Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le dossier et exécuter son contenu après vérification.
 
@@ -123,9 +136,9 @@ Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exempl
 
 ### Installer ou configurer le moteur Qwen
 
-L'application Python conserve ses dépendances légères. Les poids et le moteur d'inférence restent en dehors du dépôt : aucun modèle ni binaire n'est publié sur GitHub et l'application ne les télécharge pas automatiquement.
+**L'installation par défaut est automatique depuis la version 0.05a.** `install.bat` place le modèle et les moteurs dans le dossier de l'application et enregistre les chemins relatifs dans `qwen_settings.json`. Les fichiers téléchargés sont ignorés par Git ; aucun poids ni binaire n'est publié dans le dépôt. L'interface ne télécharge pas de modèle pendant une analyse.
 
-**2B GGUF :** télécharger [Qwen3.5-2B Heretic Q4_K_M](https://huggingface.co/darrellbest/Qwen3.5-2B-Heretic-GGUF) et une version récente de [llama.cpp pour Windows](https://github.com/ggml-org/llama.cpp/releases), extraire l'archive avec toutes ses DLL puis renseigner les chemins du modèle et de `llama-server.exe` dans la barre latérale. La version testée est `b11819`, build Vulkan x64, sur RTX 5080 ; elle n'exige pas d'installer CUDA dans l'environnement Python de l'application. Le projecteur vision n'est pas nécessaire pour les tags textuels. Sur le PC utilisé pour cette mise à jour, le modèle est installé dans `D:\I.A\GGUF\Qwen3.5-2B-Heretic-Q4_K_M.gguf` et le moteur dans `.runtimes/llama-b11819-vulkan/` ; les empreintes SHA-256 des deux téléchargements ont été vérifiées.
+**2B GGUF, configuration manuelle facultative :** les chemins de [Qwen3.5-2B Heretic Q4_K_M](https://huggingface.co/darrellbest/Qwen3.5-2B-Heretic-GGUF) et de [llama.cpp](https://github.com/ggml-org/llama.cpp/releases) restent modifiables dans la barre latérale. L'installateur utilise `b11819`, build Vulkan x64, avec repli CPU testé si nécessaire. Le projecteur vision et CUDA ne sont pas nécessaires pour cette configuration de tags textuels. Le modèle installé automatiquement se trouve dans `.models/Qwen3.5-2B-Heretic-Q4_K_M.gguf` et le moteur dans `.runtimes/llama-b11819-vulkan/` ou `.runtimes/llama-b11819-cpu/`.
 
 **4B FP8 :** renseigner le fichier `Qwen3.5-4B-heretic-fp8.safetensors`, le Python `python_embeded/python.exe` de ComfyUI portable et son dossier `ComfyUI`. Il faut une installation récente prenant en charge `comfy/text_encoders/qwen35.py` et la génération de texte. Le modèle fourni a été testé avec l'installation existante. Les paquets PyTorch et Transformers restent dans l'environnement ComfyUI ; aucun serveur ComfyUI n'est lancé.
 
@@ -163,7 +176,7 @@ L'inférence et les textes restent locaux après cette installation. Le modèle 
 Dans un terminal ouvert dans le dossier :
 
 ```powershell
-.venv\Scripts\python.exe -m unittest discover -s tests -v
+.runtimes\python\python.exe -m unittest discover -s tests -v
 ```
 
 ## Fichiers
@@ -180,5 +193,6 @@ Dans un terminal ouvert dans le dossier :
 - `examples/exemple_conversion.jsonl` : exemples de conversations récupérables et de cas à corriger manuellement.
 - `examples/exemple_tags.jsonl` : exemples de genres, fiches imbriquées, thèmes et négations pour les tags.
 - `install.bat` et `lancer.bat` : installation et lancement Windows.
+- `setup_windows.ps1`, `install_local.py` et `install_assets.py` : Python portable, téléchargements vérifiés, configuration et test du LLM autonome.
 - `tests/` : tests unitaires et scénarios d'interface Streamlit.
 - `COMPTE_RENDU_REVIEW.md` : revue de code, corrections et vérifications.

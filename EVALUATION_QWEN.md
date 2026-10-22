@@ -33,13 +33,13 @@ La **2B est proposée comme choix rapide**, avec ses limites visibles. La **4B c
 
 ## Reproduire
 
-Les chemins par défaut correspondent au PC utilisé pour le développement et restent modifiables. Le test utilise les vrais poids locaux ; il est distinct de la suite automatisée sans modèle.
+Le test utilise les vrais poids locaux ; il est distinct de la suite automatisée sans modèle. Depuis la version 0.05a, `install.bat` prépare un Python portable et la 2B dans le dossier de l'application ; ses chemins par défaut sont transportables.
 
 ```powershell
-.\.venv\Scripts\python.exe evaluate_qwen.py --backend gguf --model "D:\I.A\GGUF\Qwen3.5-2B-Heretic-Q4_K_M.gguf" --server ".runtimes\llama-b11819-vulkan\llama-server.exe" --output "evaluation-2b.json"
-.\.venv\Scripts\python.exe evaluate_qwen.py --backend comfy --model "D:\I.A\ComfyUI_windows_portable\ComfyUI\models\text_encoders\Qwen3.5-4B-heretic-fp8.safetensors" --output "evaluation-4b.json"
+.\.runtimes\python\python.exe evaluate_qwen.py --backend gguf --output "evaluation-2b.json"
+.\.runtimes\python\python.exe evaluate_qwen.py --backend comfy --model "D:\I.A\ComfyUI_windows_portable\ComfyUI\models\text_encoders\Qwen3.5-4B-heretic-fp8.safetensors" --output "evaluation-4b.json"
 ```
 
-Le script affiche chaque résultat, le temps d'analyse et le total des contrôles satisfaits. Il ferme son processus à la fin. Les rapports JSON générés sont ignorés par Git. La 4B utilise par défaut le Python et le dossier ComfyUI locaux définis dans `llm_tagging.py`.
+Le script affiche chaque résultat, le temps d'analyse et le total des contrôles satisfaits. Il ferme son processus à la fin. Les rapports JSON générés sont ignorés par Git. Pour une installation CPU uniquement, ajouter `--server ".runtimes/llama-b11819-cpu/llama-server.exe"` à la commande 2B. La 4B utilise par défaut le Python et le dossier ComfyUI locaux définis dans `llm_tagging.py`.
 
 Un import réel dans l'interface Streamlit avec la 2B a également été vérifié : une romance implicite reçoit `SFW` et `Romance`, et une fiche de thèmes sexuels adultes reçoit `NSFW`. Les 109 tests automatisés passent séparément ; leurs appels au modèle sont simulés pour ne pas exiger de GPU ni de téléchargement.

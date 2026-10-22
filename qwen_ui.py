@@ -10,6 +10,7 @@ from llm_tagging import (BASE, DEFAULT_COMFY, DEFAULT_FP8, DEFAULT_GGUF, DEFAULT
                          DEFAULT_SERVER, LocalQwen, QwenConfig, QwenError, analyze_record,
                          tag_with_qwen)
 from tagging import detect_tags, tag_entries
+from install_assets import resolve_setting
 
 
 QWEN_2B = "Qwen 2B Heretic · rapide (GGUF)"
@@ -71,9 +72,11 @@ def initialize_qwen_settings():
 
 def current_config():
     if st.session_state.tagging_engine == QWEN_4B:
-        return QwenConfig(backend="comfy", model=st.session_state.qwen_model_4b,
-                          python=st.session_state.qwen_python, comfy=st.session_state.qwen_comfy)
-    return QwenConfig(model=st.session_state.qwen_model_2b, server=st.session_state.qwen_server)
+        return QwenConfig(backend="comfy", model=resolve_setting(st.session_state.qwen_model_4b, BASE),
+                          python=resolve_setting(st.session_state.qwen_python, BASE),
+                          comfy=resolve_setting(st.session_state.qwen_comfy, BASE))
+    return QwenConfig(model=resolve_setting(st.session_state.qwen_model_2b, BASE),
+                      server=resolve_setting(st.session_state.qwen_server, BASE))
 
 
 def render_qwen_settings():
