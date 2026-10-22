@@ -1,0 +1,81 @@
+"""Tag review and editing controls shared by Explorer and Quality."""
+from __future__ import annotations
+
+from collections import Counter
+
+import pandas as pd
+import streamlit as st
+
+from tagging import TAG_RULES, detect_tags, entry_tags, normalize_tags, tag_entries
+
+
+TAG_HELP = ("Détection locale par indices français/anglais. SFW signifie qu'aucun indice NSFW reconnu "
+            "n'a été trouvé ; ce classement reste à vérifier. Les noms et œuvres sont repris de la fiche, "
+            "sans déduire leur histoire ni leurs genres officiels. Les traits peuvent concerner les "
+            "différents participants d'une conversation.")
+
+
+def render_tag_editor(entry, mutation, *, prefix):
+    with st.expander("🏷️ Tags de cette entrée"):
+        tags = entry_tags(entry)
+        known = set()
+        for group, members in {"Classification": ("SFW", "NSFW"), **TAG_RULES}.items():
+            found = [tag for tag in tags if tag in members]
+            known.update(found)
+            if found:
+                st.caption(group)
+                st.text(" · ".join(found))
+        other = [tag for tag in tags if tag not in known]
+        if other:
+            st.caption("Personnage / source / tags libres")
+            st.text(" · ".join(other))
+        if not tags:
+            st.caption("Aucun tag renseigné.")
+        st.caption(TAG_HELP)
+        if entry.tags_override is not None:
+            st.caption("Correction manuelle active : les détections par lot la conservent.")
+        with st.form(f"{prefix}_tags_{entry.uid}_{st.session_state.revision}"):
+            raw = st.text_input("Corriger les tags (séparés par ;)", value=" ; ".join(tags))
+            submitted = st.form_submit_button("Enregistrer les tags")
+        if submitted:
+            updated = normalize_tags(raw)
+            if entry.tags_override != updated:
+                mutation({"kind": "tags", "before": [(entry.uid, entry.auto_tags, entry.tags_override)]})
+                entry.tags_override = updated
+                st.rerun()
+        if st.button("Utiliser les tags automatiques", key=f"{prefix}_auto_tags_{entry.uid}"):
+            updated = detect_tags(entry.data)
+            if entry.auto_tags != updated or entry.tags_override is not None:
+                mutation({"kind": "tags", "before": [(entry.uid, entry.auto_tags, entry.tags_override)]})
+                entry.auto_tags = updated
+                entry.tags_override = None
+                st.rerun()
+        st.caption("Les tags sont conservés dans le projet et le JSONL d'origine. "
+                   "L'export Unsloth contient uniquement les messages.")
+
+
+def render_tag_panel(rows, mutation):
+    st.markdown("#### 🏷️ Tags automatiques")
+    st.write(TAG_HELP)
+    st.caption("Genres : Comedy, Romance, Slice of Life, Fantasy, Adventure, Action, Drama, Horror, "
+               "Sci-Fi, Mystery. Autres familles : source, archétypes, thèmes, traits et ton du bot.")
+    live = [row for row in rows if not row.deleted]
+    if "tagging_notice" in st.session_state:
+        st.success(st.session_state.pop("tagging_notice"))
+    if st.button("Détecter / actualiser les tags", disabled=not live):
+        with st.spinner("Analyse locale des conversations et fiches..."):
+            before = tag_entries(live)
+        if before:
+            originals = {uid: tags for uid, tags in before}
+            mutation({"kind": "tags", "before": [(row.uid, originals[row.uid], row.tags_override)
+                                                  for row in live if row.uid in originals]})
+        st.session_state.tagging_notice = (
+            f"{len(live)} entrées analysées · {len(before)} annotations automatiques actualisées. "
+            "Les corrections manuelles sont conservées. L'action est annulable.")
+        st.rerun()
+    counts = Counter(tag for row in live for tag in entry_tags(row))
+    st.caption(f"{sum(bool(entry_tags(row)) for row in live)} / {len(live)} entrées avec des tags. "
+               "Pour les corriger, ouvre une entrée dans Explorer → Tags de cette entrée.")
+    if counts:
+        st.dataframe(pd.DataFrame(counts.most_common(40), columns=["Tag", "Entrées"]),
+                     hide_index=True, width="stretch", height=min(350, 36 * len(counts) + 40))

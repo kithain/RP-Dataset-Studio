@@ -15,6 +15,8 @@ import streamlit as st
 from split_export import export_split_zip
 from merge_ui import render_merge_page
 from conversion_ui import render_conversion_panel
+from tagging import detect_tags, entry_tags, tag_entries
+from tagging_ui import render_tag_editor, render_tag_panel
 from core import (Entry, LANG_CODES, apply_filters, as_messages, content_text,
                   conversation_fields, update_conversation_text,
                   counts_by_language, delete_ids, duplicate_ids, effective_language,
@@ -64,7 +66,7 @@ def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | N
     st.session_state.page = 1
     st.session_state.pop("merge_report", None)
     st.session_state.entry_sources = dict(entry_sources or {})
-    for key in ("conversion_preview", "conversion_signature", "conversion_notice"):
+    for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice"):
         st.session_state.pop(key, None)
 
 
@@ -95,6 +97,13 @@ def undo():
     elif action["kind"] == "edit":
         item = next(e for e in st.session_state.rows if e.uid == action["id"])
         item.data = action["before"]
+        if "before_auto_tags" in action:
+            item.auto_tags = action["before_auto_tags"]
+    elif action["kind"] == "tags":
+        before = {uid: (tags, override) for uid, tags, override in action["before"]}
+        for row in st.session_state.rows:
+            if row.uid in before:
+                row.auto_tags, row.tags_override = before[row.uid]
     elif action["kind"] == "lang":
         before = dict(action["before"])
         for row in st.session_state.rows:
@@ -121,6 +130,9 @@ def import_file(source, name: str):
             for issue in errors:
                 st.error(issue)
             return
+        if st.session_state.get("auto_tags_import", True) and not name.lower().endswith(".rpwork.json"):
+            with st.spinner("Attribution des tags automatiques..."):
+                tag_entries(rows)
         loaded(rows, name, errors, repairs, entry_sources)
         st.rerun()
     except Exception as exc:
@@ -184,18 +196,20 @@ def row_table(rows: list[Entry], *, prefix: str, page_size: int = 50) -> set[int
     shown = rows[(page - 1) * page_size:page * page_size]
     data = [{"Cocher": False, "ID": r.uid, "Langue": effective_language(r),
              "Messages": message_count(r.data), "Catégorie": label(r.data),
+             "Tags": " · ".join(entry_tags(r)),
              "Extrait": preview(r.data), "Ligne": r.source_line} for r in shown]
     df = pd.DataFrame(data)
     page_ids = tuple(row.uid for row in shown)
     selection_key = f"{prefix}_grid_{st.session_state.revision}_{page}_{page_ids}"
     editor = st.data_editor(
         df, key=selection_key, hide_index=True, width="stretch", height=min(650, 60 + 36 * len(shown)),
-        disabled=["ID", "Langue", "Messages", "Catégorie", "Extrait", "Ligne"],
+        disabled=["ID", "Langue", "Messages", "Catégorie", "Tags", "Extrait", "Ligne"],
         column_config={"Cocher": st.column_config.CheckboxColumn("Sélectionner", width="small"),
                        "ID": st.column_config.NumberColumn("ID", width="small"),
                        "Langue": st.column_config.TextColumn("Langue", width="small"),
                        "Messages": st.column_config.NumberColumn("Tours", width="small"),
                        "Catégorie": st.column_config.TextColumn("Type", width="medium"),
+                       "Tags": st.column_config.TextColumn("Tags", width="medium"),
                        "Extrait": st.column_config.TextColumn("Conversation", width="large"),
                        "Ligne": st.column_config.NumberColumn("Ligne", width="small")})
     return set(int(uid) for uid in editor.loc[editor["Cocher"] == True, "ID"].tolist())
@@ -205,8 +219,11 @@ def save_conversation(entry: Entry, data: dict):
     if data == entry.data:
         st.info("Aucune modification à enregistrer.")
         return
-    mutation({"kind": "edit", "id": entry.uid, "before": entry.data})
+    mutation({"kind": "edit", "id": entry.uid, "before": entry.data,
+              "before_auto_tags": entry.auto_tags})
     entry.data = data
+    if entry.auto_tags or st.session_state.get("auto_tags_import", True):
+        entry.auto_tags = detect_tags(data)
     st.session_state.editor_notice = entry.uid
     st.rerun()
 
@@ -281,6 +298,7 @@ def inspector(rows: list[Entry], *, prefix: str):
                 else:
                     save_conversation(entry, obj)
     st.caption("Les images, appels d'outils et autres champs restent accessibles dans « JSON avancé ».")
+    render_tag_editor(entry, mutation, prefix=prefix)
     with st.expander("Langue et aperçu de l'export Unsloth"):
         st.caption("Aperçu normalisé pour Unsloth")
         messages = as_messages(entry.data)
@@ -306,12 +324,15 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.02a")
+    st.caption("Gestion locale de datasets JDR · v0.03a")
     st.divider()
     st.markdown("**Ouvrir un dataset**")
     st.checkbox("Réparer les erreurs JSONL simples", value=True, key="repair_jsonl_import",
                 help="Sépare les objets collés et retire les virgules superflues. "
                      "Le fichier d'origine reste intact. Réimporte le fichier pour appliquer ce choix.")
+    st.checkbox("Ajouter les tags automatiquement à l'import", value=True, key="auto_tags_import",
+                help="SFW/NSFW, genres, thèmes et traits par indices français/anglais. "
+                     "Les projets .rpwork.json retrouvent leurs annotations sans nouveau classement.")
     upload = st.file_uploader("Importer un fichier", type=["jsonl", "json", "csv", "tsv", "parquet"],
                               help="JSONL, JSON, CSV, TSV, Parquet, projets .rpwork.json")
     if st.button("Importer le fichier sélectionné", disabled=upload is None, use_container_width=True):
@@ -349,7 +370,7 @@ if page == "🧩 Fusionner":
 if not st.session_state.dataset_name:
     st.title("Éditeur local de datasets RP")
     st.write("Parcours tes conversations, filtre par langue ou mots-clés, supprime des lots, édite les"
-             " entrées et exporte un fichier JSONL prêt pour Unsloth.")
+             " entrées, ajoute des tags et exporte un fichier JSONL prêt pour Unsloth.")
     a, b, c = st.columns(3)
     a.info("**1. Importe**\n\nJSONL · JSON · CSV · TSV · Parquet")
     b.info("**2. Nettoie**\n\nLangues · mots-clés · doublons · édition")
@@ -389,6 +410,7 @@ if st.session_state.errors:
 if page == "🔎 Explorer":
     st.subheader("Rechercher et filtrer")
     available_langs = sorted({effective_language(r) for r in live}, key=lambda x: (x == "?", x))
+    available_tags = sorted({tag for row in live for tag in entry_tags(row)}, key=str.casefold)
     current_filters = st.session_state.filters
     with st.form("search_filters"):
         col1, col2 = st.columns(2)
@@ -399,6 +421,8 @@ if page == "🔎 Explorer":
             languages = st.multiselect("Langues", options=available_langs,
                                        default=[x for x in current_filters["languages"] if x in available_langs],
                                        format_func=lambda k: f"{k} — {LANG_CODES.get(k, k)}")
+            tags = st.multiselect("Tags à conserver (tous requis)", options=available_tags,
+                                  default=[tag for tag in current_filters.get("tags", []) if tag in available_tags])
         with col2:
             excludes = st.text_input("Mots à exclure (séparés par ;)",
                                      value=current_filters["excludes"],
@@ -406,18 +430,23 @@ if page == "🔎 Explorer":
             regex = st.checkbox("Utiliser des expressions régulières", value=current_filters["regex"])
             unconvertible = st.checkbox("Seulement les formats non convertibles",
                                        value=current_filters["unconvertible"])
+            excluded_tags = st.multiselect("Tags à exclure (au moins un)", options=available_tags,
+                                           default=[tag for tag in current_filters.get("excluded_tags", [])
+                                                    if tag in available_tags])
         submitted = st.form_submit_button("Appliquer les filtres", type="primary")
         if submitted:
             st.session_state.filters = {"contains": contains, "excludes": excludes,
                                         "languages": languages, "regex": regex,
-                                        "unconvertible": unconvertible}
+                                        "unconvertible": unconvertible, "tags": tags,
+                                        "excluded_tags": excluded_tags}
             st.session_state.explorer_page = 1
             st.rerun()
     ff = st.session_state.filters
     try:
         filtered = apply_filters(rows, contains=ff["contains"], excludes=ff["excludes"],
                                  languages=ff["languages"], use_regex=ff["regex"],
-                                 only_unconvertible=ff["unconvertible"])
+                                 only_unconvertible=ff["unconvertible"], tags=ff.get("tags"),
+                                 excluded_tags=ff.get("excluded_tags"))
     except re.error as exc:
         st.error(f"Expression régulière invalide : {exc}")
         filtered = []
@@ -456,6 +485,8 @@ if page == "🔎 Explorer":
 
 elif page == "🧹 Qualité":
     st.subheader("Contrôle qualité")
+    render_tag_panel(rows, mutation)
+    st.divider()
     count = counts_by_language(rows)
     if count:
         chart = pd.DataFrame([{"Langue": f"{code} · {LANG_CODES.get(code, code)}", "Entrées": n}
@@ -519,7 +550,7 @@ elif page == "📦 Exporter":
         with st.container(border=True):
             st.markdown("#### 1. JSONL nettoyé (structure d'origine)")
             st.write("Conserve les champs originaux, à l'exception des entrées supprimées."
-                     " Les corrections manuelles de langue sont ajoutées au champ `language`.")
+                     " Les corrections de langue sont ajoutées au champ `language`, les tags au champ `tags`.")
             if st.button("Préparer le JSONL d'origine", key="prepare_original"):
                 blob, amount = export_jsonl(rows)
                 st.session_state.export_original = (blob, amount)
@@ -542,7 +573,7 @@ elif page == "📦 Exporter":
     st.divider()
     with st.container(border=True):
         st.markdown("#### 3. Projet modifiable (.rpwork.json)")
-        st.write("Sauvegarde aussi la corbeille, tes annotations de langue et les fichiers sources des conversations."
+        st.write("Sauvegarde aussi la corbeille, les langues, les tags automatiques et manuels, et les fichiers sources."
                  " Réimporte ce fichier dans l'application pour poursuivre plus tard.")
         if st.button("Préparer la sauvegarde du projet"):
             st.session_state.export_project_data = export_project(
@@ -631,6 +662,14 @@ et mélanger les conversations. Le JSONL Unsloth est préparé dans Exporter ; l
 **Filtre** : `romance ; bataille` conserve les entrées contenant *au moins un*
 de ces termes. Le filtre « exclure » rejette toute entrée contenant un terme interdit.
 Les expressions régulières sont facultatives, sans distinction majuscule/minuscule.
+
+**Tags** : ajoutés automatiquement à l'import (désactivable) et pendant la fusion. Dans Qualité,
+« Détecter / actualiser les tags » analyse les entrées actives. Dans Explorer, conserve tous les
+tags choisis ou exclus toute entrée portant un tag exclu. L'inspecteur permet de corriger les tags
+ou de revenir aux suggestions automatiques. Les corrections sont annulables et conservées
+dans les projets ; le JSONL d'origine reçoit un champ `tags`. ChatML conserve seulement les messages.
+Les indices français/anglais restent approximatifs : SFW signifie aucun indice NSFW reconnu.
+Les personnages et œuvres sont repris des champs ou libellés explicites, sans base de connaissances.
 
 **Langues** : utilise les métadonnées de langue existantes ou l'onglet Qualité pour détecter
 le français, l'anglais, l'espagnol et d'autres langues localement. Une détection automatique

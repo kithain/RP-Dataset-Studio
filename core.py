@@ -11,9 +11,11 @@ import json
 import re
 from collections import Counter
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO, Iterable
+
+from tagging import entry_tags, normalize_tags
 
 
 @dataclass
@@ -23,6 +25,8 @@ class Entry:
     source_line: int
     deleted: bool = False
     language_override: str | None = None
+    auto_tags: list[str] = field(default_factory=list)
+    tags_override: list[str] | None = None
 
 
 LANG_CODES = {
@@ -210,6 +214,8 @@ def load_dataset(stream: BinaryIO, filename: str, *, repair_jsonl: bool = True,
             source_line = item.get("source_line", 0)
             deleted = item.get("deleted", False)
             language = item.get("language_override")
+            auto_tags = item.get("auto_tags", [])
+            tags_override = item.get("tags_override")
             if type(uid) is not int or uid < 1:
                 raise ValueError(f"Entrée {index} du projet : identifiant entier positif requis")
             if uid in uids:
@@ -220,8 +226,15 @@ def load_dataset(stream: BinaryIO, filename: str, *, repair_jsonl: bool = True,
                 raise ValueError(f"Entrée {index} du projet : deleted doit être un booléen")
             if language is not None and (not isinstance(language, str) or language not in LANG_CODES):
                 raise ValueError(f"Entrée {index} du projet : langue invalide")
+            for name, value in (("auto_tags", auto_tags), ("tags_override", tags_override)):
+                if name == "tags_override" and value is None:
+                    continue
+                if not isinstance(value, list) or any(not isinstance(tag, str) or not tag.strip()
+                                                      for tag in value):
+                    raise ValueError(f"Entrée {index} du projet : {name} doit être une liste de tags textuels")
             uids.add(uid)
-            entries.append(Entry(uid, item["data"], source_line, deleted, language))
+            entries.append(Entry(uid, item["data"], source_line, deleted, language,
+                                 auto_tags, tags_override))
         raw_sources = payload.get("entry_sources", {})
         if not isinstance(raw_sources, dict):
             raise ValueError("Le champ entry_sources du projet doit être un objet")
@@ -436,10 +449,13 @@ def terms(raw: str) -> list[str]:
 
 def apply_filters(rows: list[Entry], *, languages: list[str] | None = None,
                   contains: str = "", excludes: str = "", use_regex: bool = False,
-                  include_deleted: bool = False, only_unconvertible: bool = False) -> list[Entry]:
+                  include_deleted: bool = False, only_unconvertible: bool = False,
+                  tags: list[str] | None = None, excluded_tags: list[str] | None = None) -> list[Entry]:
     """OR for include terms; exclusion if ANY excluded term matches."""
     positive = terms(contains)
     negative = terms(excludes)
+    required = {tag.casefold() for tag in normalize_tags(tags)}
+    forbidden = {tag.casefold() for tag in normalize_tags(excluded_tags)}
     if use_regex:
         yes = [re.compile(t, flags=re.IGNORECASE) for t in positive]
         no = [re.compile(t, flags=re.IGNORECASE) for t in negative]
@@ -454,10 +470,14 @@ def apply_filters(rows: list[Entry], *, languages: list[str] | None = None,
             continue
         if only_unconvertible and as_messages(row.data) is not None:
             continue
+        row_tags = entry_tags(row)
+        actual_tags = {tag.casefold() for tag in row_tags}
+        if not required.issubset(actual_tags) or forbidden.intersection(actual_tags):
+            continue
         if not yes and not no:
             matches.append(row)
             continue
-        corpus = content_text(row.data)
+        corpus = content_text(row.data) + "\n" + "\n".join(row_tags)
         if use_regex:
             if yes and not any(r.search(corpus) for r in yes):
                 continue
@@ -525,6 +545,8 @@ def export_jsonl(rows: list[Entry], chatml: bool = False) -> tuple[bytes, int]:
         item = {"messages": as_messages(row.data)} if chatml else dict(row.data)
         if not chatml and row.language_override and row.language_override != "?":
             item["language"] = row.language_override
+        if not chatml and (row.auto_tags or row.tags_override is not None):
+            item["tags"] = entry_tags(row)
         if chatml and item["messages"] is None:
             continue
         output.write(json.dumps(item, ensure_ascii=False, default=str) + "\n")
@@ -536,7 +558,8 @@ def export_project(rows: list[Entry], source: str,
                    entry_sources: dict[int, str] | None = None) -> bytes:
     payload = {"format": "rp-dataset-studio-v1", "source": source,
                "entries": [{"uid": r.uid, "data": r.data, "source_line": r.source_line,
-                            "deleted": r.deleted, "language_override": r.language_override}
+                            "deleted": r.deleted, "language_override": r.language_override,
+                            "auto_tags": r.auto_tags, "tags_override": r.tags_override}
                            for r in rows],
                "entry_sources": {str(uid): name for uid, name in (entry_sources or {}).items()}}
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8")

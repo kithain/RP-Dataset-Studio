@@ -111,7 +111,8 @@ def prepare_merge(analysis: MergeAnalysis, *, remove_duplicates: bool = True,
                 active += 1
                 convertible += recovery is not None or original.uid not in analysis.incompatible
         rows.append(Entry(original.uid, data, original.source_line, deleted,
-                          original.language_override))
+                          original.language_override, list(original.auto_tags),
+                          list(original.tags_override) if original.tags_override is not None else None))
     if shuffle:
         retained = [row for row in rows if not row.deleted]
         Random(seed).shuffle(retained)

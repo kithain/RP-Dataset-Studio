@@ -3,10 +3,32 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.02a (alpha) — 21 octobre 2026.**
+**Version actuelle : 0.03a (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.03a
+
+Cette version ajoute l'attribution automatique de tags aux conversations et aux fiches de personnages.
+
+### Nouveautés
+
+- **Tags à l'import et après fusion**, activés par défaut et désactivables : classification SFW/NSFW, genres, personnage/source, archétypes, thèmes, traits et ton du bot. L'analyse utilise des indices français/anglais dans les textes et métadonnées reconnus, sans téléchargement de modèle ni appel réseau.
+- **Filtres de tags dans Explorer** : tous les tags à conserver sont requis ; un seul tag à exclure suffit à écarter une entrée. Les tags figurent aussi dans le tableau et peuvent être recherchés par mots-clés ou regex.
+- **Correction par entrée**, avec regroupement par famille dans l'inspecteur, tags libres, suppression de tous les tags, retour aux suggestions automatiques et annulation. Les corrections manuelles sont conservées lors d'une nouvelle détection par lot.
+- **Analyse par lot dans Qualité**, avec nombre d'entrées annotées et fréquence des tags. Les entrées de la corbeille restent inchangées.
+- **Sauvegarde des annotations** dans les projets `.rpwork.json`, y compris les corrections manuelles et la corbeille. Le JSONL original et ses fichiers découpés reçoivent un champ racine `tags` ; le JSONL Unsloth/ChatML conserve uniquement `messages`.
+
+### Corrections et limites
+
+- Les doublons de tags et les variantes connues sont normalisés. NSFW prend le dessus sur SFW lorsqu'ils sont tous les deux présents.
+- Les titres d'œuvres explicitement cités ou en italique et leurs alias entre parenthèses sont repris, ainsi que les noms renseignés dans les fiches. Aucune base de connaissances n'attribue automatiquement les genres ou traits officiels d'un personnage.
+- Les champs d'images, URL et appels d'outils ne sont pas analysés. Les négations simples telles que « sans contenu érotique » et « no NSFW » sont reconnues ; l'analyse reste approximative.
+- **SFW signifie uniquement qu'aucun indice NSFW pris en charge n'a été trouvé**, sans garantir l'absence de contenu sensible. Les entrées vides ou dont le texte n'est pas reconnu restent sans classification. Un thème Vore affirmé est classé NSFW.
+- Les corrections manuelles, même une liste vide, sont restaurées à l'ouverture d'un projet et conservées pendant la fusion. Les anciens projets restent lisibles, avec le même marqueur de format.
+
+**Validation : 89 tests réussis**, dont 22 nouveaux tests couvrant la détection, les négations, les formats reconnus, les filtres, les corrections, l'annulation, les projets, les exports et la fusion.
 
 ## Changements de la version 0.02a
 
@@ -50,6 +72,7 @@ Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le d
 - **Explorer** : choisir des langues, inclure/exclure des mots-clés (séparer les expressions avec `;`), utiliser éventuellement des regex ; lire les conversations en entier dans « Lecture » et les éditer dans « Modifier les messages », sans manipuler du JSON ; cocher les lignes d'une page pour les supprimer ou leur attribuer une langue. Enregistrer avant de changer d'entrée ou de vue. « JSON avancé » reste disponible pour les rôles, métadonnées et formats spécifiques. L'édition des textes conserve le format source et les autres champs, y compris les blocs non textuels.
 - **Supprimer par lot** : sélectionner tous les résultats filtrés, y compris sur les autres pages, puis confirmer. Les données passent dans la corbeille et restent récupérables.
 - **Qualité** : détecter les langues (localement), inspecter les doublons, évaluer la conversion ChatML, supprimer les doublons.
+- **Ajouter les tags** : laisser cochée « Ajouter les tags automatiquement à l'import » ou, sur un dataset déjà ouvert, aller dans Qualité → « Détecter / actualiser les tags ». Dans Explorer, utiliser « Tags à conserver » et « Tags à exclure », puis « Appliquer les filtres ». Ouvrir « Tags de cette entrée » dans l'inspecteur pour corriger les suggestions ou revenir aux tags automatiques. Une liste vide enregistrée masque tous les tags de l'entrée. Sauvegarder le projet pour conserver cette correction.
 - **Convertir les incompatibles** : dans Qualité, analyser les entrées incompatibles puis appliquer les conversions récupérables. Les messages vides sont retirés, les rôles et champs connus normalisés, les tableaux de messages stockés comme JSON décodés et certains couples explicites demande/réponse reconnus. Les textes, métadonnées et blocs textuels sont conservés ; aucune réponse ni rôle inconnu n'est deviné. Les images et appels d'outils nécessitent une correction manuelle pour un export texte. L'opération est annulable. Cocher « Inclure les entrées de la corbeille » permet aussi de convertir et restaurer celles écartées lors d'une fusion. La fusion applique ces conversions automatiquement par défaut, avant le dédoublonnage.
 - **Exporter** : générer un JSONL conservant le format original, un JSONL normalisé `messages` pour Unsloth, ou un fichier `.rpwork.json` pour reprendre le travail plus tard.
 - **Découper** : dans Exporter → « Découper en plusieurs fichiers », choisir le nombre d'entrées par fichier (2 000 par défaut) et le format original ou ChatML. Préparer puis télécharger le ZIP contenant les fichiers numérotés. L'ordre et les conversations complètes sont conservés ; le dernier fichier contient le reste. La corbeille est exclue et le format ChatML exclut également les entrées incompatibles.
@@ -64,6 +87,22 @@ Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le d
 La conversion de Qualité et la fusion automatique reconnaissent aussi les couples `user/assistant`, `human/gpt`, `instruction/response` (avec contexte `input` textuel facultatif) et `question/response`, ainsi que les tableaux de messages sous `conversation`, `dialogue` ou `chat`.
 
 L'export Unsloth conserve exclusivement les conversations ayant au moins un message `user` et un message `assistant`, dans le format `{"messages":[...]}`. Les entrées incompatibles sont exclues de **cet export uniquement**.
+
+### Familles de tags
+
+| Famille | Exemples |
+| --- | --- |
+| Classification | `SFW`, `NSFW` |
+| Personnage / source | Noms et œuvres explicitement renseignés, `Anime` |
+| Genre | `Comedy`, `Romance`, `Slice of Life`, `Fantasy`, `Adventure`, `Action`, `Drama`, `Horror`, `Sci-Fi`, `Mystery` |
+| Archétype / dynamique | `Kouhai`, `Senpai dynamic`, `Tsundere`, `Sadodere`, `Sadistic`, `Dominant`, `Submissive`, `Teasing`, `Playful`, `Shy` |
+| Thèmes | `Vore`, `Predatory`, `Voracious`, `Flirty`, `Violence` |
+| Traits | `Athletic`, `Energetic`, `Popular`, `Petite`, `Female`, `Male`, `High Schooler` |
+| Ton du bot | `Roleplay`, `Immersive`, `Descriptive`, `Stays in Character` |
+
+Les tags décrivent les indices présents dans l'entrée entière ; un trait peut concerner un autre participant que le personnage principal. Un nom seul ne suffit pas à déduire `Comedy`, `Romance`, `Tsundere` ou d'autres attributs absents du texte. Les tags libres existants sont conservés et peuvent être complétés manuellement. Les tags racine d'un JSONL exporté font référence lors de sa réouverture, même si la fiche contient encore ses métadonnées de tags imbriquées.
+
+Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exemple_tags.jsonl). Le modèle Qwen local n'est pas utilisé par cette version : aucune dépendance d'inférence ou mémoire GPU supplémentaire n'est requise.
 
 ## Aperçus des nouvelles fonctions
 
@@ -86,7 +125,7 @@ L'export Unsloth conserve exclusivement les conversations ayant au moins un mess
 - Une correction manuelle de langue est sauvegardée dans `.rpwork.json` et ajoutée sous `language` dans l'export JSONL original ; elle n'est pas incluse dans l'export ChatML.
 - Les projets `.rpwork.json` conservent aussi les noms des fichiers sources et les numéros de ligne des conversations fusionnées, y compris celles de la corbeille. Les anciens projets restent lisibles, sans provenance supplémentaire lorsqu'elle n'a pas été sauvegardée. Un projet mal formé est refusé avant de remplacer le dataset ouvert.
 - La langue détectée est une estimation, particulièrement fragile pour les dialogues très courts, les univers avec noms inventés ou les conversations multilingues.
-- Ce logiciel ne classe pas automatiquement les scènes selon leur degré de violence ou d'intimité ; le filtrage par mots-clés est littéral (ou regex).
+- La classification SFW/NSFW et les tags sont des suggestions locales par règles, à vérifier. Ils n'évaluent pas précisément le degré de violence ou d'intimité. Le filtrage par mots-clés est littéral (ou regex).
 - L'export ChatML normalise le contenu textuel des messages et peut omettre des champs spécifiques à certains jeux de données (images, outils, métadonnées). Tester une portion du dataset avant un entraînement.
 - Les CSV/TSV doivent être encodés en UTF-8. Pour un CSV avec un champ `messages`, ce champ doit contenir un tableau JSON valide.
 - Pour des fichiers gigantesques, les imports peuvent consommer beaucoup de RAM : le programme conserve les conversations en mémoire pour permettre l'édition.
@@ -107,8 +146,10 @@ Dans un terminal ouvert dans le dossier :
 - `merge_datasets.py` et `merge_ui.py` : analyse et interface de fusion de plusieurs sources.
 - `conversation_conversion.py` et `conversion_ui.py` : analyse, aperçu et conversion des conversations récupérables.
 - `split_export.py` : découpage des exports JSONL dans une archive ZIP.
+- `tagging.py` et `tagging_ui.py` : suggestions de tags, édition, analyse par lot et statistiques.
 - `examples/exemple_rp.jsonl` : six conversations de démonstration, dont une en anglais et un doublon.
 - `examples/exemple_conversion.jsonl` : exemples de conversations récupérables et de cas à corriger manuellement.
+- `examples/exemple_tags.jsonl` : exemples de genres, fiches imbriquées, thèmes et négations pour les tags.
 - `install.bat` et `lancer.bat` : installation et lancement Windows.
 - `tests/` : tests unitaires et scénarios d'interface Streamlit.
 - `COMPTE_RENDU_REVIEW.md` : revue de code, corrections et vérifications.

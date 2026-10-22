@@ -9,6 +9,7 @@ import streamlit as st
 
 from core import export_jsonl
 from merge_datasets import analyze_merge, prepare_merge
+from tagging import tag_entries
 
 
 def render_merge_page(on_load):
@@ -72,6 +73,9 @@ def render_merge_page(on_load):
                            help="Écarte les entrées sans échange utilisateur/assistant et les conversions "
                                 "qui omettraient des images, des appels d'outils ou des messages non reconnus.")
     shuffle = st.checkbox("Mélanger les conversations", value=True, key="merge_shuffle")
+    auto_tags = st.checkbox("Ajouter les tags automatiques après la fusion", value=True, key="merge_auto_tags",
+                            help="Classe les entrées actives localement. Les corrections manuelles "
+                                 "des projets sources sont conservées ; les tags restent hors du JSONL ChatML.")
     seed = int(st.number_input("Graine du mélange", value=42, min_value=0, step=1,
                                 disabled=not shuffle, key="merge_seed",
                                 help="La même valeur permet de retrouver le même ordre avec les mêmes fichiers."))
@@ -95,11 +99,14 @@ def render_merge_page(on_load):
                 "Exporte d'abord le projet actuel si tu souhaites conserver des changements non sauvegardés.")
     if st.button("Fusionner et préparer l'export Unsloth", disabled=selection.convertible == 0, type="primary"):
         with st.spinner("Fusion et préparation du JSONL Unsloth..."):
+            if auto_tags:
+                tag_entries(selection.rows)
             blob, amount = export_jsonl(selection.rows, chatml=True)
         report = {"fichiers": analysis.sources, "conversations_exportees": amount,
                   "doublons_ecartes": selection.duplicates, "incompatibles_ecartees": selection.excluded,
                   "deja_supprimees": selection.already_deleted, "melange": shuffle, "graine": seed,
                   "conversions_automatiques": selection.converted,
+                  "tags_automatiques": auto_tags,
                   "erreurs": analysis.errors, "reparations": analysis.repairs}
         on_load(selection.rows, "fusion_dataset.jsonl", analysis.errors, analysis.repairs, analysis.origins)
         st.session_state.merge_report = report
