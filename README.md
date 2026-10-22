@@ -3,10 +3,26 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.03a (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.04a (alpha) — 22 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.04a
+
+Cette version utilise réellement **Qwen pour l'analyse sémantique des tags**, avec deux modèles locaux au choix.
+
+- **Qwen3.5-2B Heretic Q4_K_M**, sélectionné par défaut : fichier d'environ 1,31 Go, exécuté par un processus `llama-server` local géré automatiquement par l'application.
+- **Qwen3.5-4B Heretic FP8**, le modèle fourni : réutilisation du Python portable, du tokenizer et du moteur installés avec ComfyUI. Le serveur et l'interface ComfyUI peuvent rester fermés.
+- **Compréhension des genres implicites**, des dynamiques et des thèmes NSFW, avec sortie JSON validée. `Needs Review` signale une classification incertaine. Les règles par mots-clés restent un choix explicite ; elles ne remplacent jamais silencieusement une analyse Qwen en échec.
+- **Analyse intégrée** à l'import, à la fusion, à l'actualisation par lot, au retour aux tags automatiques et à l'édition d'une conversation. Les corrections manuelles, exports, projets et annulations sont conservés.
+- **Conversations longues** : tous les textes reconnus sont découpés en segments de 6 000 caractères avec 256 caractères de recouvrement ; les tags sont réunis et une classification NSFW sur un segment prend le dessus. Un dépassement de contexte est signalé, sans tronquer silencieusement la conversation.
+- **Gestion du modèle** : configuration locale sauvegardable, chargement à la demande, réutilisation entre les entrées, accès sérialisé et bouton de déchargement. Les processus sont cachés sous Windows et ne servent que sur `127.0.0.1`.
+- **Erreurs visibles** : JSON invalide, réponse tronquée, modèle absent ou délai dépassé conservent les annotations précédentes. Un échec d'infrastructure interrompt le lot et laisse les entrées suivantes à analyser.
+
+**Validation : 109 tests automatisés réussis**, dont 20 nouveaux tests dédiés au moteur, aux réponses invalides, au découpage, aux erreurs, à l'interruption, au processus local et à l'interface. La suite standard simule le modèle et ne télécharge aucun poids. Un import Streamlit a aussi été vérifié avec la vraie 2B, sur deux entrées de romance implicite et de thèmes NSFW adultes.
+
+**Essais réels sur RTX 5080 :** la 2B classe correctement SFW/NSFW les huit exemples de contrôle et satisfait les critères de tags sur sept ; la 4B satisfait les huit. La 2B invente des tags relationnels sur une conversation neutre. Ces quelques exemples ne constituent pas une mesure générale de précision. Voir [l'évaluation Qwen et sa commande de reproduction](EVALUATION_QWEN.md).
 
 ## Changements de la version 0.03a
 
@@ -73,6 +89,7 @@ Si Windows bloque l'exécution d'un fichier `.bat`, ouvrir un terminal dans le d
 - **Supprimer par lot** : sélectionner tous les résultats filtrés, y compris sur les autres pages, puis confirmer. Les données passent dans la corbeille et restent récupérables.
 - **Qualité** : détecter les langues (localement), inspecter les doublons, évaluer la conversion ChatML, supprimer les doublons.
 - **Ajouter les tags** : laisser cochée « Ajouter les tags automatiquement à l'import » ou, sur un dataset déjà ouvert, aller dans Qualité → « Détecter / actualiser les tags ». Dans Explorer, utiliser « Tags à conserver » et « Tags à exclure », puis « Appliquer les filtres ». Ouvrir « Tags de cette entrée » dans l'inspecteur pour corriger les suggestions ou revenir aux tags automatiques. Une liste vide enregistrée masque tous les tags de l'entrée. Sauvegarder le projet pour conserver cette correction.
+- **Choisir Qwen** : barre latérale → « Analyse des tags » → moteur 2B ou 4B. Vérifier les chemins, puis utiliser « Charger / vérifier Qwen » ; le premier import peut aussi le charger automatiquement. « Enregistrer la configuration des tags » conserve ces choix dans `qwen_settings.json`, ignoré par Git. « Décharger Qwen de la mémoire » libère le processus et ses ressources ; l'analyse suivante le rechargera.
 - **Convertir les incompatibles** : dans Qualité, analyser les entrées incompatibles puis appliquer les conversions récupérables. Les messages vides sont retirés, les rôles et champs connus normalisés, les tableaux de messages stockés comme JSON décodés et certains couples explicites demande/réponse reconnus. Les textes, métadonnées et blocs textuels sont conservés ; aucune réponse ni rôle inconnu n'est deviné. Les images et appels d'outils nécessitent une correction manuelle pour un export texte. L'opération est annulable. Cocher « Inclure les entrées de la corbeille » permet aussi de convertir et restaurer celles écartées lors d'une fusion. La fusion applique ces conversions automatiquement par défaut, avant le dédoublonnage.
 - **Exporter** : générer un JSONL conservant le format original, un JSONL normalisé `messages` pour Unsloth, ou un fichier `.rpwork.json` pour reprendre le travail plus tard.
 - **Découper** : dans Exporter → « Découper en plusieurs fichiers », choisir le nombre d'entrées par fichier (2 000 par défaut) et le format original ou ChatML. Préparer puis télécharger le ZIP contenant les fichiers numérotés. L'ordre et les conversations complètes sont conservés ; le dernier fichier contient le reste. La corbeille est exclue et le format ChatML exclut également les entrées incompatibles.
@@ -102,7 +119,17 @@ L'export Unsloth conserve exclusivement les conversations ayant au moins un mess
 
 Les tags décrivent les indices présents dans l'entrée entière ; un trait peut concerner un autre participant que le personnage principal. Un nom seul ne suffit pas à déduire `Comedy`, `Romance`, `Tsundere` ou d'autres attributs absents du texte. Les tags libres existants sont conservés et peuvent être complétés manuellement. Les tags racine d'un JSONL exporté font référence lors de sa réouverture, même si la fiche contient encore ses métadonnées de tags imbriquées.
 
-Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exemple_tags.jsonl). Le modèle Qwen local n'est pas utilisé par cette version : aucune dépendance d'inférence ou mémoire GPU supplémentaire n'est requise.
+Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exemple_tags.jsonl). Qwen fournit les suggestions selon le sens ; le mode « Règles rapides » fournit les suggestions par mots-clés de la version 0.03a. Avec Qwen, SFW/NSFW est une estimation du modèle, toujours à vérifier.
+
+### Installer ou configurer le moteur Qwen
+
+L'application Python conserve ses dépendances légères. Les poids et le moteur d'inférence restent en dehors du dépôt : aucun modèle ni binaire n'est publié sur GitHub et l'application ne les télécharge pas automatiquement.
+
+**2B GGUF :** télécharger [Qwen3.5-2B Heretic Q4_K_M](https://huggingface.co/darrellbest/Qwen3.5-2B-Heretic-GGUF) et une version récente de [llama.cpp pour Windows](https://github.com/ggml-org/llama.cpp/releases), extraire l'archive avec toutes ses DLL puis renseigner les chemins du modèle et de `llama-server.exe` dans la barre latérale. La version testée est `b11819`, build Vulkan x64, sur RTX 5080 ; elle n'exige pas d'installer CUDA dans l'environnement Python de l'application. Le projecteur vision n'est pas nécessaire pour les tags textuels. Sur le PC utilisé pour cette mise à jour, le modèle est installé dans `D:\I.A\GGUF\Qwen3.5-2B-Heretic-Q4_K_M.gguf` et le moteur dans `.runtimes/llama-b11819-vulkan/` ; les empreintes SHA-256 des deux téléchargements ont été vérifiées.
+
+**4B FP8 :** renseigner le fichier `Qwen3.5-4B-heretic-fp8.safetensors`, le Python `python_embeded/python.exe` de ComfyUI portable et son dossier `ComfyUI`. Il faut une installation récente prenant en charge `comfy/text_encoders/qwen35.py` et la génération de texte. Le modèle fourni a été testé avec l'installation existante. Les paquets PyTorch et Transformers restent dans l'environnement ComfyUI ; aucun serveur ComfyUI n'est lancé.
+
+L'inférence et les textes restent locaux après cette installation. Le modèle reste chargé entre les analyses et consomme de la mémoire jusqu'au déchargement. Le classement NSFW a été testé sur des thèmes adultes déclarés, sans refus ; cela ne garantit ni l'absence de refus dans tous les cas ni des tags toujours exacts.
 
 ## Aperçus des nouvelles fonctions
 
@@ -125,7 +152,7 @@ Pour essayer la fonction, importer [examples/exemple_tags.jsonl](examples/exempl
 - Une correction manuelle de langue est sauvegardée dans `.rpwork.json` et ajoutée sous `language` dans l'export JSONL original ; elle n'est pas incluse dans l'export ChatML.
 - Les projets `.rpwork.json` conservent aussi les noms des fichiers sources et les numéros de ligne des conversations fusionnées, y compris celles de la corbeille. Les anciens projets restent lisibles, sans provenance supplémentaire lorsqu'elle n'a pas été sauvegardée. Un projet mal formé est refusé avant de remplacer le dataset ouvert.
 - La langue détectée est une estimation, particulièrement fragile pour les dialogues très courts, les univers avec noms inventés ou les conversations multilingues.
-- La classification SFW/NSFW et les tags sont des suggestions locales par règles, à vérifier. Ils n'évaluent pas précisément le degré de violence ou d'intimité. Le filtrage par mots-clés est littéral (ou regex).
+- La classification SFW/NSFW et les tags sont des suggestions du moteur choisi, à vérifier. Qwen peut inventer ou omettre des tags ; les règles peuvent manquer le sens implicite. Les segments longs peuvent perdre des liens entre des passages éloignés. Le filtrage par mots-clés reste littéral (ou regex).
 - L'export ChatML normalise le contenu textuel des messages et peut omettre des champs spécifiques à certains jeux de données (images, outils, métadonnées). Tester une portion du dataset avant un entraînement.
 - Les CSV/TSV doivent être encodés en UTF-8. Pour un CSV avec un champ `messages`, ce champ doit contenir un tableau JSON valide.
 - Pour des fichiers gigantesques, les imports peuvent consommer beaucoup de RAM : le programme conserve les conversations en mémoire pour permettre l'édition.
@@ -147,6 +174,8 @@ Dans un terminal ouvert dans le dossier :
 - `conversation_conversion.py` et `conversion_ui.py` : analyse, aperçu et conversion des conversations récupérables.
 - `split_export.py` : découpage des exports JSONL dans une archive ZIP.
 - `tagging.py` et `tagging_ui.py` : suggestions de tags, édition, analyse par lot et statistiques.
+- `llm_tagging.py`, `qwen_worker.py` et `qwen_ui.py` : analyse sémantique, processus locaux GGUF/ComfyUI et configuration.
+- `evaluate_qwen.py` et `EVALUATION_QWEN.md` : essais reproductibles avec les vrais modèles et résultats observés.
 - `examples/exemple_rp.jsonl` : six conversations de démonstration, dont une en anglais et un doublon.
 - `examples/exemple_conversion.jsonl` : exemples de conversations récupérables et de cas à corriger manuellement.
 - `examples/exemple_tags.jsonl` : exemples de genres, fiches imbriquées, thèmes et négations pour les tags.

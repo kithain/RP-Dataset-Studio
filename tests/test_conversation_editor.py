@@ -82,6 +82,7 @@ class TestConversationFields(unittest.TestCase):
 class TestConversationEditorUI(unittest.TestCase):
     def open_entry(self, data):
         app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
         app.session_state.rows = [Entry(1, deepcopy(data), 1)]
         app.session_state.dataset_name = "test.jsonl"
         app.run()

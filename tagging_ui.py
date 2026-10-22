@@ -6,20 +6,22 @@ from collections import Counter
 import pandas as pd
 import streamlit as st
 
-from tagging import TAG_RULES, detect_tags, entry_tags, normalize_tags, tag_entries
+from tagging import TAG_RULES, entry_tags, normalize_tags
+from qwen_ui import analyze_tags, annotate_rows
+from llm_tagging import QwenError
 
 
-TAG_HELP = ("Détection locale par indices français/anglais. SFW signifie qu'aucun indice NSFW reconnu "
-            "n'a été trouvé ; ce classement reste à vérifier. Les noms et œuvres sont repris de la fiche, "
-            "sans déduire leur histoire ni leurs genres officiels. Les traits peuvent concerner les "
-            "différents participants d'une conversation.")
+TAG_HELP = ("Qwen analyse le sens du texte, les genres implicites, les dynamiques et les thèmes, "
+            "y compris NSFW. Le moteur se choisit dans la barre latérale → Analyse des tags. "
+            "Les résultats restent des suggestions à vérifier ; Needs Review signale une classification "
+            "incertaine. Les règles sans LLM restent disponibles en option explicite.")
 
 
 def render_tag_editor(entry, mutation, *, prefix):
     with st.expander("🏷️ Tags de cette entrée"):
         tags = entry_tags(entry)
         known = set()
-        for group, members in {"Classification": ("SFW", "NSFW"), **TAG_RULES}.items():
+        for group, members in {"Classification": ("SFW", "NSFW", "Needs Review"), **TAG_RULES}.items():
             found = [tag for tag in tags if tag in members]
             known.update(found)
             if found:
@@ -44,12 +46,18 @@ def render_tag_editor(entry, mutation, *, prefix):
                 entry.tags_override = updated
                 st.rerun()
         if st.button("Utiliser les tags automatiques", key=f"{prefix}_auto_tags_{entry.uid}"):
-            updated = detect_tags(entry.data)
-            if entry.auto_tags != updated or entry.tags_override is not None:
-                mutation({"kind": "tags", "before": [(entry.uid, entry.auto_tags, entry.tags_override)]})
-                entry.auto_tags = updated
-                entry.tags_override = None
-                st.rerun()
+            try:
+                with st.spinner("Analyse de cette entrée..."):
+                    updated = analyze_tags(entry.data)
+                st.session_state.tagging_errors = [(uid, message) for uid, message in
+                    st.session_state.get("tagging_errors", []) if uid != entry.uid]
+                if entry.auto_tags != updated or entry.tags_override is not None:
+                    mutation({"kind": "tags", "before": [(entry.uid, entry.auto_tags, entry.tags_override)]})
+                    entry.auto_tags = updated
+                    entry.tags_override = None
+                    st.rerun()
+            except QwenError as exc:
+                st.error(f"Tags conservés : {exc}")
         st.caption("Les tags sont conservés dans le projet et le JSONL d'origine. "
                    "L'export Unsloth contient uniquement les messages.")
 
@@ -64,14 +72,15 @@ def render_tag_panel(rows, mutation):
         st.success(st.session_state.pop("tagging_notice"))
     if st.button("Détecter / actualiser les tags", disabled=not live):
         with st.spinner("Analyse locale des conversations et fiches..."):
-            before = tag_entries(live)
+            before, errors = annotate_rows(live)
         if before:
             originals = {uid: tags for uid, tags in before}
             mutation({"kind": "tags", "before": [(row.uid, originals[row.uid], row.tags_override)
                                                   for row in live if row.uid in originals]})
         st.session_state.tagging_notice = (
-            f"{len(live)} entrées analysées · {len(before)} annotations automatiques actualisées. "
+            f"Lot de {len(live)} entrées · {len(before)} annotations automatiques actualisées. "
             "Les corrections manuelles sont conservées. L'action est annulable.")
+        st.session_state.tagging_errors = errors
         st.rerun()
     counts = Counter(tag for row in live for tag in entry_tags(row))
     st.caption(f"{sum(bool(entry_tags(row)) for row in live)} / {len(live)} entrées avec des tags. "

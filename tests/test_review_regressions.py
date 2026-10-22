@@ -143,6 +143,7 @@ class TestProjectValidation(unittest.TestCase):
 class TestReviewUI(unittest.TestCase):
     def open_rows(self, rows, page="🔎 Explorer"):
         app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
         app.session_state.rows = rows
         app.session_state.dataset_name = "current.jsonl"
         app.session_state.navigation_page = page

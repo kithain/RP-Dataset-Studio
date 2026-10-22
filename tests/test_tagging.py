@@ -200,6 +200,7 @@ class TestTagStorage(unittest.TestCase):
 class TestTaggingUI(unittest.TestCase):
     def open_page(self, rows, page="🔎 Explorer"):
         app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
         app.session_state.rows = rows
         app.session_state.dataset_name = "test.jsonl"
         app.run()
@@ -223,7 +224,9 @@ class TestTaggingUI(unittest.TestCase):
             path = Path(directory) / "input.jsonl"
             payload = b'{"prompt":"Comedy","completion":"Romance"}\n'
             path.write_bytes(payload)
-            app = AppTest.from_file(str(APP), default_timeout=60).run()
+            app = AppTest.from_file(str(APP), default_timeout=60)
+            app.session_state.tagging_engine = "Règles rapides (sans LLM)"
+            app.run()
             next(t for t in app.text_input if t.label == "Chemin du fichier sur ce PC").set_value(str(path)).run()
             self.click(app, "Ouvrir le chemin local")
             self.assertEqual(set(entry_tags(app.session_state.rows[0])), {"SFW", "Comedy", "Romance"})
@@ -251,7 +254,7 @@ class TestTaggingUI(unittest.TestCase):
         self.assertIn("Romance", entry_tags(app.session_state.rows[1]))
         self.assertEqual(app.session_state.rows[2].auto_tags, [])
         self.assertNotIn("export_original", app.session_state)
-        self.assertTrue(any("2 entrées analysées" in item.value for item in app.success))
+        self.assertTrue(any("Lot de 2 entrées" in item.value for item in app.success))
         self.click(app, "Détecter / actualiser les tags")
         self.assertEqual(len(app.session_state.history), 1)
         self.undo(app)
@@ -311,7 +314,9 @@ class TestTaggingUI(unittest.TestCase):
                 first, second = Path(directory) / "a.jsonl", Path(directory) / "b.jsonl"
                 first.write_text('{"prompt":"Comedy","completion":"Hello"}\n', encoding="utf-8")
                 second.write_text('{"prompt":"Romance","completion":"Bye"}\n', encoding="utf-8")
-                app = AppTest.from_file(str(APP), default_timeout=60).run()
+                app = AppTest.from_file(str(APP), default_timeout=60)
+                app.session_state.tagging_engine = "Règles rapides (sans LLM)"
+                app.run()
                 self.navigate(app, "🧩 Fusionner")
                 next(t for t in app.text_area if t.label == "Ou chemins locaux, un par ligne").set_value(f"{first}\n{second}").run()
                 self.click(app, "Analyser les fichiers à fusionner")

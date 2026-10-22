@@ -15,8 +15,10 @@ import streamlit as st
 from split_export import export_split_zip
 from merge_ui import render_merge_page
 from conversion_ui import render_conversion_panel
-from tagging import detect_tags, entry_tags, tag_entries
+from tagging import entry_tags
 from tagging_ui import render_tag_editor, render_tag_panel
+from qwen_ui import analyze_tags, annotate_rows, render_qwen_settings, report_errors
+from llm_tagging import QwenError
 from core import (Entry, LANG_CODES, apply_filters, as_messages, content_text,
                   conversation_fields, update_conversation_text,
                   counts_by_language, delete_ids, duplicate_ids, effective_language,
@@ -66,7 +68,7 @@ def loaded(rows: list[Entry], name: str, errs: list[str], repairs: list[str] | N
     st.session_state.page = 1
     st.session_state.pop("merge_report", None)
     st.session_state.entry_sources = dict(entry_sources or {})
-    for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice"):
+    for key in ("conversion_preview", "conversion_signature", "conversion_notice", "tagging_notice", "tagging_errors"):
         st.session_state.pop(key, None)
 
 
@@ -130,10 +132,12 @@ def import_file(source, name: str):
             for issue in errors:
                 st.error(issue)
             return
+        tagging_errors = []
         if st.session_state.get("auto_tags_import", True) and not name.lower().endswith(".rpwork.json"):
             with st.spinner("Attribution des tags automatiques..."):
-                tag_entries(rows)
+                _, tagging_errors = annotate_rows(rows)
         loaded(rows, name, errors, repairs, entry_sources)
+        st.session_state.tagging_errors = tagging_errors
         st.rerun()
     except Exception as exc:
         st.error(f"Impossible d'ouvrir le fichier : {exc}")
@@ -219,11 +223,19 @@ def save_conversation(entry: Entry, data: dict):
     if data == entry.data:
         st.info("Aucune modification à enregistrer.")
         return
+    tags = entry.auto_tags
+    if entry.auto_tags or st.session_state.get("auto_tags_import", True):
+        try:
+            with st.spinner("Actualisation des tags..."):
+                tags = analyze_tags(data)
+            st.session_state.tagging_errors = [(uid, message) for uid, message in
+                st.session_state.get("tagging_errors", []) if uid != entry.uid]
+        except QwenError as exc:
+            st.session_state.tagging_errors = [(entry.uid, str(exc))]
     mutation({"kind": "edit", "id": entry.uid, "before": entry.data,
               "before_auto_tags": entry.auto_tags})
     entry.data = data
-    if entry.auto_tags or st.session_state.get("auto_tags_import", True):
-        entry.auto_tags = detect_tags(data)
+    entry.auto_tags = tags
     st.session_state.editor_notice = entry.uid
     st.rerun()
 
@@ -324,14 +336,15 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.03a")
+    st.caption("Gestion locale de datasets JDR · v0.04a")
+    render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
     st.checkbox("Réparer les erreurs JSONL simples", value=True, key="repair_jsonl_import",
                 help="Sépare les objets collés et retire les virgules superflues. "
                      "Le fichier d'origine reste intact. Réimporte le fichier pour appliquer ce choix.")
     st.checkbox("Ajouter les tags automatiquement à l'import", value=True, key="auto_tags_import",
-                help="SFW/NSFW, genres, thèmes et traits par indices français/anglais. "
+                help="SFW/NSFW, genres, thèmes et traits avec le moteur de tags choisi. "
                      "Les projets .rpwork.json retrouvent leurs annotations sans nouveau classement.")
     upload = st.file_uploader("Importer un fichier", type=["jsonl", "json", "csv", "tsv", "parquet"],
                               help="JSONL, JSON, CSV, TSV, Parquet, projets .rpwork.json")
@@ -406,6 +419,8 @@ if st.session_state.errors:
     with st.expander(f"⚠️ {len(st.session_state.errors)} erreur(s) d'import affichables", expanded=False):
         for issue in st.session_state.errors:
             st.write(issue)
+
+report_errors(st.session_state.get("tagging_errors", []))
 
 if page == "🔎 Explorer":
     st.subheader("Rechercher et filtrer")
@@ -668,8 +683,12 @@ Les expressions régulières sont facultatives, sans distinction majuscule/minus
 tags choisis ou exclus toute entrée portant un tag exclu. L'inspecteur permet de corriger les tags
 ou de revenir aux suggestions automatiques. Les corrections sont annulables et conservées
 dans les projets ; le JSONL d'origine reçoit un champ `tags`. ChatML conserve seulement les messages.
-Les indices français/anglais restent approximatifs : SFW signifie aucun indice NSFW reconnu.
-Les personnages et œuvres sont repris des champs ou libellés explicites, sans base de connaissances.
+Dans la barre latérale → Analyse des tags, choisis Qwen 2B Heretic (GGUF), Qwen 4B Heretic
+(le modèle FP8 fourni), ou les règles sans LLM. Qwen analyse les genres implicites et les thèmes
+NSFW ; ses suggestions peuvent contenir des erreurs. Needs Review signale une incertitude.
+Un échec conserve les annotations précédentes et affiche une erreur, sans basculer sur les règles.
+Les longs textes sont analysés en segments avec recouvrement. Le modèle reste en mémoire
+jusqu'au déchargement ou à la fermeture de l'application. Les noms et œuvres doivent être explicites.
 
 **Langues** : utilise les métadonnées de langue existantes ou l'onglet Qualité pour détecter
 le français, l'anglais, l'espagnol et d'autres langues localement. Une détection automatique

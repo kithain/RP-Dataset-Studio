@@ -131,7 +131,9 @@ class TestMergeDatasets(unittest.TestCase):
 
 class TestMergeUI(unittest.TestCase):
     def open_page(self):
-        app = AppTest.from_file(str(APP), default_timeout=60).run()
+        app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
+        app.run()
         next(r for r in app.radio if r.label == "Navigation").set_value("🧩 Fusionner").run()
         self.assertFalse(app.exception)
         return app

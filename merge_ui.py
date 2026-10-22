@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import export_jsonl
 from merge_datasets import analyze_merge, prepare_merge
-from tagging import tag_entries
+from qwen_ui import annotate_rows
 
 
 def render_merge_page(on_load):
@@ -99,8 +99,9 @@ def render_merge_page(on_load):
                 "Exporte d'abord le projet actuel si tu souhaites conserver des changements non sauvegardés.")
     if st.button("Fusionner et préparer l'export Unsloth", disabled=selection.convertible == 0, type="primary"):
         with st.spinner("Fusion et préparation du JSONL Unsloth..."):
+            tagging_errors = []
             if auto_tags:
-                tag_entries(selection.rows)
+                _, tagging_errors = annotate_rows(selection.rows)
             blob, amount = export_jsonl(selection.rows, chatml=True)
         report = {"fichiers": analysis.sources, "conversations_exportees": amount,
                   "doublons_ecartes": selection.duplicates, "incompatibles_ecartees": selection.excluded,
@@ -109,6 +110,7 @@ def render_merge_page(on_load):
                   "tags_automatiques": auto_tags,
                   "erreurs": analysis.errors, "reparations": analysis.repairs}
         on_load(selection.rows, "fusion_dataset.jsonl", analysis.errors, analysis.repairs, analysis.origins)
+        st.session_state.tagging_errors = tagging_errors
         st.session_state.merge_report = report
         st.session_state.export_chatml = (blob, amount)
         st.session_state.pop("merge_analysis", None)

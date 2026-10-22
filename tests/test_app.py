@@ -15,6 +15,7 @@ APP = Path(__file__).resolve().parents[1] / "app.py"
 class TestLanguageDetection(unittest.TestCase):
     def quality_page(self, rows):
         app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
         app.session_state.rows = rows
         app.session_state.dataset_name = "test.jsonl"
         app.run()
@@ -85,7 +86,9 @@ class TestImportRepairs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "broken.jsonl"
             path.write_bytes(payload)
-            app = AppTest.from_file(str(APP), default_timeout=60).run()
+            app = AppTest.from_file(str(APP), default_timeout=60)
+            app.session_state.tagging_engine = "Règles rapides (sans LLM)"
+            app.run()
             next(t for t in app.text_input if t.label == "Chemin du fichier sur ce PC").set_value(str(path)).run()
             next(b for b in app.button if b.label == "Ouvrir le chemin local").click().run()
             self.assertFalse(app.exception)

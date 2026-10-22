@@ -112,6 +112,7 @@ class TestConversationConversion(unittest.TestCase):
 class TestConversionUI(unittest.TestCase):
     def quality_page(self, rows):
         app = AppTest.from_file(str(APP), default_timeout=60)
+        app.session_state.tagging_engine = "Règles rapides (sans LLM)"
         app.session_state.rows = rows
         app.session_state.dataset_name = "test.jsonl"
         app.run()
