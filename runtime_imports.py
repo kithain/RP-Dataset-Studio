@@ -16,6 +16,8 @@ REQUIRED_API = (
     ("tagging_ui", {"analyze_tag_batch": ()}),
     ("llm_tagging", {"generate_json": ()}),
     ("qwen_ui", {"generate_book": ()}),
+    ("book_generation", {"validate_narration": ()}),
+    ("book_ui", {"render_book_page": ("generator_version",)}),
 )
 
 

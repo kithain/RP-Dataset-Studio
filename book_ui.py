@@ -5,14 +5,14 @@ from pathlib import Path
 
 import streamlit as st
 
-from book_generation import (MODES, create_job, decode_book, job_rows,
+from book_generation import (MODES, VERSION, create_job, decode_book, job_rows,
                              restore_checkpoint, run_job, save_checkpoint, tasks)
 from core import export_jsonl, export_project
 from llm_tagging import BASE
 from qwen_ui import RULES, current_config, generate_book
 
 
-def render_book_page(on_load):
+def render_book_page(on_load, *, generator_version=VERSION):
     st.title("📖 Créer un dataset depuis un livre")
     st.write("Transforme un livre TXT en scènes de RP et en exemples de narration avec ton Qwen local.")
     upload = st.file_uploader("Livre au format TXT", type=["txt"], key="book_upload")
@@ -33,7 +33,8 @@ def render_book_page(on_load):
     engine = st.session_state.tagging_engine
     config = current_config()
     model = f"{engine} / {Path(config.model).name}"
-    st.caption(f"Modèle : {model}. Choisis Qwen 2B ou 4B dans Analyse des tags, dans la barre latérale.")
+    st.caption(f"Modèle : {model}. Pour changer, ouvre Analyse des tags dans la barre latérale, "
+               "sélectionne Qwen 4B ou modifie le chemin du GGUF, puis prépare à nouveau le livre.")
     if engine == RULES:
         st.info("La génération nécessite Qwen ; sélectionne le moteur 2B ou 4B dans la barre latérale.")
     path = Path(local.strip().strip('"')) if local.strip() else None
@@ -73,13 +74,18 @@ def render_book_page(on_load):
     st.subheader(f"Livre préparé : {params['title']}")
     st.caption(f"{params['filename']} · {len(job['passages'])} passage(s) · "
                f"{', '.join(MODES[mode] for mode in params['modes'])}")
-    stale = signature != st.session_state.get("book_signature")
+    legacy = params.get("version") != generator_version
+    stale = legacy or signature != st.session_state.get("book_signature")
+    if legacy:
+        st.warning("Cette préparation utilise l'ancien générateur. Clique sur Préparer pour appliquer les "
+                   "corrections ; la nouvelle progression sera séparée de l'ancienne sauvegarde.")
     if stale:
         st.info("Le fichier ou les réglages ont changé. Clique sur Préparer pour les utiliser. "
                 "Les résultats affichés ci-dessous proviennent encore du livre préparé.")
     st.write("**Narration et style** : Qwen rédige la consigne ; la réponse conserve exactement le passage "
              "original. **RP et personnages** : Qwen sélectionne des répliques originales et identifie "
-             "le personnage joué. Leur texte et leur ordre sont vérifiés ; relis l'attribution des voix.")
+             "le personnage joué. Leur texte et leur ordre sont vérifiés ; relis l'attribution des voix. "
+             "Les sommaires, mentions d'édition et playlists détectés sont écartés automatiquement.")
     with st.expander("Premier passage source"):
         st.text(job["passages"][0]["text"])
     total = len(tasks(job))
@@ -134,7 +140,8 @@ def render_book_page(on_load):
     with st.expander("Passage source et provenance"):
         st.json(row.data["book_source"])
     st.caption("Tous les exemples portent Needs Review. Le contrôle automatique vérifie la structure, "
-               "la présence du nom du personnage et les répliques exactes ; vérifie la consigne et les rôles.")
+               "la présence du nom du personnage et les répliques originales. Un contrôle de langue et de "
+               "vocabulaire écarte certaines consignes hors sujet ; vérifie encore la consigne et les rôles.")
     name = Path(params["filename"]).stem
     original, _ = export_jsonl(rows)
     chatml, _ = export_jsonl(rows, chatml=True)

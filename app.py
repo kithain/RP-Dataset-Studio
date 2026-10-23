@@ -367,7 +367,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.08a")
+    st.caption("Gestion locale de datasets JDR · v0.08b")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")

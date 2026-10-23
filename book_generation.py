@@ -6,13 +6,14 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import unicodedata
 
 from core import Entry
 from llm_tagging import QwenError, QwenUnavailable
 
 
 MODES = {"rp": "RP et personnages", "narration": "Narration et style"}
-VERSION = "book-generation-v1"
+VERSION = "book-generation-v2"
 NARRATION_SCHEMA = {
     "type": "object", "properties": {
         "prompt": {"type": "string", "minLength": 40, "maxLength": 1200}},
@@ -39,6 +40,8 @@ de raconter la scène, avec les personnages, l'atmosphère et le point de vue pr
 En français, commence par un verbe comme « Raconte », « Écris » ou « Décris ».
 Ne rédige pas un résumé déclaratif. Ne recopie pas la réponse. Ne mentionne ni extrait, ni titre
 du livre, ni auteur. N'ajoute aucun fait absent du passage. Une à trois phrases suffisent.
+Conserve la langue du passage, sans demander une traduction. Utilise ses personnages, objets ou
+lieux concrets pour ancrer la consigne. Une page de crédits ou un sommaire n'est pas une scène.
 Le champ JSON prompt doit contenir ta consigne finale, concrète et prête à l'emploi, de 40 à
 1200 caractères. Par exemple, pour une scène où un marin répare son bateau :
 Raconte comment un marin répare son bateau à l'aube, en décrivant ses gestes et le calme du port.
@@ -138,15 +141,96 @@ def _parse(raw):
     return value
 
 
+def _fold(text):
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                   if not unicodedata.combining(c))
+
+
+def non_narrative_reason(text):
+    """Conservative signals for editorial pages, including flattened ebook tables."""
+    folded = _fold(text)
+    chapters = len(re.findall(r"\b(?:chapitre|chapter)\b", folded))
+    contents = re.search(r"\b(?:sommaire|table des matieres|table of contents)\b", folded)
+    if chapters >= 6 or (contents and chapters >= 2):
+        return "Sommaire / liste de chapitres, sans scène à entraîner."
+    rights = sum(bool(re.search(pattern, folded)) for pattern in (
+        r"©|\bcopyright\b", r"\bisbn\b", r"\btous droits reserves\b|\ball rights reserved\b",
+        r"\bpour la presente edition\b|\bdocument numerique\b|\bedition numerique\b"))
+    if rights >= 2:
+        return "Mentions d'édition / copyright / ISBN, sans scène à entraîner."
+    playlist = re.match(r"\s*(?:atmosphere|playlist|bande originale|soundtrack)\b", folded)
+    if playlist and len(re.findall(r"\S[ \t]+[–-][ \t]+\S", text)) >= 3:
+        return "Playlist / liste de chansons, sans scène à entraîner."
+    return None
+
+
+_PROMPT_STOPWORDS = set("""raconte ecris decris redige write describe narrate scene passage court
+texte histoire situation atmosphere point vue comment travers partir conserver indique suivants
+avec dans pour cette ainsi elle elles sont etait avaient comme alors leur leurs mais plus tout
+vers dont sous sans entre puis apres avant aussi celui celle fait faire fait etre avoir tres
+the and that this these those with from into about where when while they their them have has
+was were will would describe write short story text following scene using style tone character
+personnage personnages francais anglais french english langue language""".split())
+
+
+def validate_narration(instruction, source):
+    """Reject clear language/lexical contradictions; this is not a semantic fact check."""
+    source_words = re.findall(r"[^\W\d_]+", _fold(source))
+    prompt_words = re.findall(r"[^\W\d_]+", _fold(instruction))
+    french = set(source_words) & {"le", "la", "les", "des", "une", "dans", "pour", "elle", "il", "etait"}
+    english = set(source_words) & {"the", "and", "she", "he", "was", "were", "with", "their"}
+    prompt_folded = _fold(instruction)
+    if len(french) >= 3 and len(english) < 2:
+        if re.search(r"\b(?:en|in)\s+(?:anglais|english)\b", prompt_folded):
+            raise QwenError("La consigne demande de l'anglais pour un passage français.")
+        if len(set(prompt_words) & {"the", "and", "she", "he", "was", "were", "with"}) >= 3:
+            raise QwenError("La consigne semble être en anglais pour un passage français.")
+    meaningful = lambda words: {word for word in words if len(word) >= 4 and word not in _PROMPT_STOPWORDS}
+    source_terms, prompt_terms = meaningful(source_words), meaningful(prompt_words)
+    common = source_terms & prompt_terms
+    if len(source_terms) >= 5 and (len(common) < 2 or len(common) / max(1, len(prompt_terms)) < 0.15):
+        raise QwenError("Consigne insuffisamment ancrée dans le passage : conserve ses noms, lieux ou objets, "
+                        "sans inventer une autre scène.")
+
+
+def _canonical(text):
+    chars, starts, ends = [], [], []
+    replacements = {c: "'" for c in "’‘‛`"}
+    replacements.update({c: "-" for c in "—–−‐‑"})
+    replacements.update({c: '"' for c in "“”"})
+    for index, char in enumerate(text):
+        value = " " if char.isspace() else replacements.get(char, char)
+        if value == " " and chars and chars[-1] == " ":
+            ends[-1] = index + 1
+        else:
+            chars.append(value)
+            starts.append(index)
+            ends.append(index + 1)
+    return "".join(chars), starts, ends
+
+
+def _find_original(source, quote, cursor):
+    # Locate typography variants only; always return the original source characters.
+    normalized, starts, ends = _canonical(source[cursor:])
+    target = _canonical(quote)[0].strip()
+    position = normalized.find(target) if target else -1
+    if position < 0:
+        raise QwenError("Réplique RP absente du passage ou hors de l'ordre du texte.")
+    return cursor + starts[position], cursor + ends[position + len(target) - 1]
+
+
 def make_record(job, index, mode, raw):
     value = _parse(raw)
     passage = job["passages"][index]
+    if non_narrative_reason(passage["text"]):
+        raise QwenError("Ce passage éditorial ne doit pas devenir un exemple d'entraînement.")
     if mode == "narration":
         if set(value) != {"prompt"}:
             raise QwenError("Champs de narration inattendus.")
         instruction = _text(value["prompt"], "Consigne", 1200)
         if len(instruction) < 40:
             raise QwenError("La consigne de narration est trop courte ou générique.")
+        validate_narration(instruction, passage["text"])
         messages = [{"role": "user", "content": instruction},
                     {"role": "assistant", "content": passage["text"]}]
     else:
@@ -171,9 +255,8 @@ def make_record(job, index, mode, raw):
             if not isinstance(turn, dict) or set(turn) != {"role", "content"} or turn["role"] != role:
                 raise QwenError("Rôles RP invalides ou non alternés.")
             content = _text(turn["content"], "Message RP", 3000)
-            position = passage["text"].find(content, cursor)
-            if position < 0:
-                raise QwenError("Réplique RP absente du passage ou hors de l'ordre du texte.")
+            position, end = _find_original(passage["text"], content, cursor)
+            content = passage["text"][position:end]
             if role == "assistant":
                 speakers = re.findall(
                     r"(?i:[,—–]\s*(?:dit|répondit|demanda|murmura|souffla|ajouta|reprit|lança|cria|chuchota))"
@@ -182,7 +265,7 @@ def make_record(job, index, mode, raw):
                 if any(speaker.casefold() not in name_parts for speaker in speakers):
                     raise QwenError("La réplique assistant est attribuée explicitement à un autre personnage. "
                                     "Choisis comme character le personnage qui prononce la réponse assistant.")
-            cursor = position + len(content)
+            cursor = end
             if first_user is None:
                 first_user = position
             messages.append({"role": role, "content": content})
@@ -203,16 +286,21 @@ def make_record(job, index, mode, raw):
 def run_job(job, generate, *, limit=None, save=None, progress=None):
     """Commit each complete task before progress can interrupt the Streamlit run."""
     pending = [task for task in tasks(job) if task[0] not in job["results"]]
-    if limit is not None:
-        pending = pending[:limit]
     seen = {digest(row["messages"]) for row in job["results"].values() if "messages" in row}
     total = len(tasks(job))
+    attempted = 0
     for key, index, mode in pending:
         try:
             passage = job["passages"][index]["text"]
-            if len(passage.strip()) < 80:
+            excluded_reason = non_narrative_reason(passage)
+            if excluded_reason:
+                job["results"][key] = {"skipped": excluded_reason}
+            elif len(passage.strip()) < 80:
                 job["results"][key] = {"skipped": "Passage trop court (moins de 80 caractères)."}
             else:
+                if limit is not None and attempted >= limit:
+                    break
+                attempted += 1
                 schema = NARRATION_SCHEMA if mode == "narration" else RP_SCHEMA
                 instructions = NARRATION_INSTRUCTIONS if mode == "narration" else RP_INSTRUCTIONS
                 prompt = instructions + "\nSOURCE DATA (JSON):\n" + json.dumps(

@@ -45,6 +45,8 @@ import tag_management
 import tagging_ui
 import qwen_ui
 import llm_tagging
+import book_generation
+import book_ui
 
 row = core.Entry(11, {"text": "Romance"}, 4)
 pool = qwen_ui.clients()
@@ -57,6 +59,8 @@ del tag_management.untagged_entries
 del tagging_ui.analyze_tag_batch
 del llm_tagging.generate_json
 del qwen_ui.generate_book
+del book_generation.validate_narration
+book_ui.render_book_page = lambda on_load: None
 
 app = AppTest.from_file(str(Path("app.py").resolve()), default_timeout=30)
 app.session_state.rows = [row]
@@ -71,6 +75,8 @@ assert callable(tag_management.untagged_entries)
 assert callable(tagging_ui.analyze_tag_batch)
 assert callable(llm_tagging.generate_json)
 assert callable(qwen_ui.generate_book)
+assert callable(book_generation.validate_narration)
+assert "generator_version" in __import__("inspect").signature(book_ui.render_book_page).parameters
 assert "resolve_classification" in __import__("inspect").signature(tagging.normalize_tags).parameters
 assert app.session_state.rows[0] is row
 assert app.session_state.history == [{"kind": "lang", "before": [(11, None)]}]

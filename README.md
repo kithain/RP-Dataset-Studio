@@ -3,10 +3,20 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.08a (alpha) — 22 octobre 2026.**
+**Version actuelle : 0.08b (alpha) — 23 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.08b
+
+- **Pages non narratives écartées avant Qwen** : les listes de chapitres, sommaires, blocs copyright/ISBN et playlists reconnus reçoivent un motif d'exclusion dans la progression. Ils ne deviennent plus des réponses de narration assorties d'une scène inventée. L'aperçu passe ces exclusions pour atteindre un passage exploitable. Le filtre utilise des indices textuels ; les cas ambigus et les passages mélangeant crédits et récit restent à examiner dans les motifs.
+- **Répliques des TXT mieux reconnues** : les espaces multiples ou insécables, apostrophes droites/courbes et variantes de tirets/guillemets typographiques sont tolérés uniquement pour retrouver la réplique. Les messages exportés sont ensuite repris dans le texte original, avec ses caractères et ses espaces. Une réécriture, une réplique absente ou un ordre inversé restent rejetés.
+- **Consignes de narration contrôlées** : une demande explicite d'anglais ou certains textes anglais face à une source clairement française sont refusés. Un contrôle de vocabulaire vérifie aussi la présence d'éléments concrets communs entre consigne et passage ; un résultat manifestement hors sujet fait l'objet de l'essai de réparation existant, puis reste en erreur s'il n'est pas corrigé. Ce contrôle heuristique ne prouve pas la fidélité et peut refuser une paraphrase valable : relire les consignes reste nécessaire.
+- **Essai avec un autre modèle clarifié** : ouvrir la barre latérale → « 🧠 Analyse des tags » → « Moteur de tags » → Qwen 4B Heretic, puis « Charger / vérifier Qwen ». Dans « 📖 Depuis un livre », préparer à nouveau avant de générer un aperçu. Le chemin « Modèle Qwen GGUF » du profil GGUF peut également pointer vers un autre fichier GGUF compatible avec le moteur local. Aucun nouveau modèle n'est téléchargé automatiquement. Le changement de modèle crée une progression distincte et conserve celle du 2B.
+- **Anciennes préparations isolées** : le générateur utilise une nouvelle révision interne de progression. Une préparation 0.08a déjà en mémoire demande un nouveau clic sur Préparer ; les anciennes sauvegardes restent sur disque et leurs résultats ne sont pas repris comme s'ils avaient passé les nouveaux contrôles. Les projets `.rpwork.json` conservent leur format. Les modules d'une session Streamlit déjà ouverte sont actualisés sans vider le dataset ni les ressources Qwen.
+
+**Validation : 191 tests automatisés réussis**, dont 28 tests du générateur et de son interface, également réussis avec le Python portable. Neuf nouveaux tests couvrent les variantes typographiques sans réécriture, les sommaires aplatis/crédits/playlists, l'aperçu qui atteint le récit, une tête de chapitre suivie de prose, les consignes hors sujet ou dans une autre langue, les anciennes progressions et le changement 2B → 4B sans écraser la sauvegarde précédente. Un essai réel du 4B sur la scène française de contrôle produit un exemple RP et un exemple de narration. Il ne constitue pas une évaluation de qualité sur le livre de l'utilisateur, qui n'a pas été retraité.
 
 ## Changements de la version 0.08a
 

@@ -9,11 +9,12 @@ from unittest.mock import Mock, patch
 from streamlit.testing.v1 import AppTest
 
 import book_ui
-from book_generation import (checkpoint_bytes, create_job, decode_book, job_rows, make_record,
-                             restore_checkpoint, run_job, save_checkpoint, split_book, tasks)
+from book_generation import (VERSION, checkpoint_bytes, create_job, decode_book, job_rows, make_record,
+                             non_narrative_reason, restore_checkpoint, run_job, save_checkpoint,
+                             split_book, tasks)
 from core import Entry, export_jsonl, export_project, load_dataset
 from llm_tagging import LocalQwen, QwenConfig, QwenError, QwenUnavailable, generate_json
-from qwen_ui import QWEN_2B, RULES
+from qwen_ui import QWEN_2B, QWEN_4B, RULES
 
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
@@ -38,6 +39,93 @@ def generated(system, prompt, **kwargs):
 
 
 class TestBookGeneration(unittest.TestCase):
+    def test_ebook_typography_is_matched_but_only_original_characters_are_exported(self):
+        text = SOURCE.replace("Tu l'as ouverte", "Tu\u00a0l’as   ouverte").replace(
+            "— Non, répondit Lina.", "– Non,\u202frépondit Lina.")
+        current = job(("rp",), text)
+        run_job(current, Mock(return_value=rp()))
+        rows, _ = job_rows(current)
+        self.assertFalse(current["errors"])
+        self.assertIn("Tu\u00a0l’as   ouverte", rows[0].data["messages"][1]["content"])
+        self.assertEqual(rows[0].data["messages"][2]["content"], "– Non,\u202frépondit Lina. Elle est pour toi.")
+        restored = job(("rp",), text)
+        restore_checkpoint(restored, checkpoint_bytes(current))
+        self.assertEqual(restored["results"], current["results"])
+
+    def test_typography_tolerance_does_not_accept_rewriting_or_reordered_quotes(self):
+        current = job(("rp",))
+        for wrong in (rp().replace("Non,", "Jamais,"), rp().replace("ouverte", "fermée")):
+            with self.assertRaises(QwenError):
+                make_record(current, 0, "rp", wrong)
+        value = json.loads(rp())
+        value["messages"].reverse()
+        value["messages"][0]["role"], value["messages"][1]["role"] = "user", "assistant"
+        with self.assertRaises(QwenError):
+            make_record(current, 0, "rp", json.dumps(value))
+
+    def test_flattened_contents_rights_and_playlists_are_skipped_before_inference(self):
+        pages = [
+            "Sommaire Couverture Titre CHAPITRE UN : LE PORT CHAPITRE DEUX : LA LETTRE "
+            "CHAPITRE TROIS : LE RETOUR CHAPITRE QUATRE : LE VOYAGE",
+            "© Éditions de démonstration, 2020, pour la présente édition. "
+            "ISBN : 9780000000000. Ce document numérique est un exemple de test.",
+            "ATMOSPHÈRE First Song – First Artist Second Song – Second Artist "
+            "Third Song – Third Artist Fourth Song – Fourth Artist",
+        ]
+        for page in pages:
+            with self.subTest(page=page):
+                self.assertIsNotNone(non_narrative_reason(page))
+                current = job(text=page)
+                generate = Mock(side_effect=AssertionError("editorial page sent to model"))
+                run_job(current, generate)
+                generate.assert_not_called()
+                self.assertEqual(len(current["results"]), 2)
+                self.assertFalse(job_rows(current)[0])
+                self.assertFalse(current["errors"])
+                with self.assertRaises(QwenError):
+                    make_record(current, 0, "narration", generated("", "Ne génère pas la réponse"))
+
+    def test_a_chapter_heading_followed_by_prose_is_kept(self):
+        text = "CHAPITRE UN : LA LETTRE\n\n" + SOURCE
+        self.assertIsNone(non_narrative_reason(text))
+        current = job(("narration",), text)
+        run_job(current, generated)
+        self.assertEqual(job_rows(current)[0][0].data["messages"][-1]["content"], text)
+
+    def test_preview_moves_past_editorial_pages_to_an_actual_scene(self):
+        text = "Sommaire " + "CHAPITRE UN : LA LETTRE " * 25 + "\n\n" + SOURCE
+        current = job(text=text)
+        self.assertEqual(len(current["passages"]), 2)
+        generate = Mock(side_effect=generated)
+        run_job(current, generate, limit=1)
+        generate.assert_called_once()
+        self.assertIn("skipped", current["results"]["0:narration"])
+        self.assertIn("messages", current["results"]["1:rp"])
+        self.assertNotIn("1:narration", current["results"])
+
+    def test_unrelated_and_wrong_language_instructions_are_not_accepted(self):
+        for prompt in (
+            "Écris une scène de cuisine où une femme prépare un dîner sous une lumière rouge.",
+            "Écris en anglais la remise de la lettre entre Lina et Hugo dans la bibliothèque.",
+            "Describe the letter with the rain and the library where she was waiting with him.",
+        ):
+            with self.subTest(prompt=prompt), self.assertRaises(QwenError):
+                make_record(job(), 0, "narration", json.dumps({"prompt": prompt}))
+        current = job(("narration",))
+        run_job(current, Mock(return_value=json.dumps({"prompt":
+            "Écris une scène de cuisine où une femme prépare un dîner sous une lumière rouge."})))
+        self.assertFalse(current["results"])
+        self.assertIn("0:narration", current["errors"])
+
+    def test_old_generator_progress_is_not_reused_as_new_validated_data(self):
+        current = job()
+        old = deepcopy(current)
+        old["parameters"]["version"] = "book-generation-v1"
+        old_payload = {"format": "book-generation-v1", "id": current["id"], "results": {}, "errors": {}}
+        self.assertNotEqual(current["parameters"]["version"], old["parameters"]["version"])
+        with self.assertRaises(ValueError):
+            restore_checkpoint(current, json.dumps(old_payload))
+
     def test_decoding_is_explicit_and_never_silently_drops_accents(self):
         for encoding in ("utf-8-sig", "utf-16", "cp1252"):
             self.assertEqual(decode_book("Éloïse\r\nLina".encode(encoding), encoding), "Éloïse\nLina")
@@ -301,6 +389,35 @@ class TestBookUI(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertTrue(any("nécessite Qwen" in item.value for item in app.info))
         self.assertTrue(next(b for b in app.button if b.label.startswith("Préparer le livre")).disabled)
+
+    def test_switching_to_4b_creates_separate_progress_without_overwriting_2b(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(book_ui, "BASE", Path(directory)):
+            app, _ = self.open_book(directory)
+            self.click(app, "Préparer le livre / reprendre la sauvegarde")
+            with patch("book_ui.generate_book", side_effect=generated):
+                self.click(app, "Générer un aperçu")
+            old_path = Path(app.session_state.book_checkpoint)
+            original = old_path.read_bytes()
+            next(s for s in app.selectbox if s.label == "Moteur de tags").set_value(QWEN_4B).run()
+            self.assertFalse(app.exception)
+            self.assertTrue(next(b for b in app.button if b.label == "Générer tout le livre / reprendre").disabled)
+            self.click(app, "Préparer le livre / reprendre la sauvegarde")
+            self.assertNotEqual(Path(app.session_state.book_checkpoint), old_path)
+            self.assertEqual(old_path.read_bytes(), original)
+            self.assertIn(QWEN_4B, app.session_state.book_job["parameters"]["model"])
+            self.assertFalse(app.session_state.book_job["results"])
+
+    def test_a_live_old_preparation_is_blocked_until_the_book_is_prepared_again(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(book_ui, "BASE", Path(directory)):
+            app, _ = self.open_book(directory)
+            self.click(app, "Préparer le livre / reprendre la sauvegarde")
+            app.session_state.book_job["parameters"]["version"] = "book-generation-v1"
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertTrue(next(b for b in app.button if b.label == "Générer un aperçu").disabled)
+            self.assertTrue(any("ancien générateur" in item.value for item in app.warning))
+            self.click(app, "Préparer le livre / reprendre la sauvegarde")
+            self.assertEqual(app.session_state.book_job["parameters"]["version"], VERSION)
 
 
 if __name__ == "__main__":
