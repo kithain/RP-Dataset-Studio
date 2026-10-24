@@ -9,7 +9,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from finetuning import VERSION, Runner, create_job, digest, export_bundle, restore_checkpoint, save_checkpoint
+from finetuning import (VERSION, Runner, create_job, digest, exclusion_report, export_bundle,
+                        restore_checkpoint, save_checkpoint)
 from install_assets import resolve_setting
 from llm_tagging import BASE, DEFAULT_SERVER, QwenConfig, QwenError
 from memory_guard import memory_snapshot
@@ -63,6 +64,25 @@ def model_signature(config):
     return value
 
 
+def render_exclusion_details(job):
+    report = exclusion_report(job)
+    if not report["total"]:
+        return
+    with st.expander(f"Motifs des exclusions ({report['total']})", expanded=True):
+        st.caption("Ces motifs proviennent de la préparation en cours : contrôles avant génération, "
+                   "classement du modèle ou décision manuelle. Chaque entrée compte une fois dans le résumé ; "
+                   "les numéros de doublons y sont regroupés. Les décisions automatiques restent à vérifier.")
+        st.dataframe(report["summary"], hide_index=True, use_container_width=True,
+                     key=f"ft_exclusions_summary_{job['id']}")
+        st.markdown("**Détail par entrée : numéro, ligne source et motif exact**")
+        st.dataframe(report["rows"], hide_index=True, use_container_width=True, height=260,
+                     key=f"ft_exclusions_rows_{job['id']}")
+        payload = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in report["rows"])
+        st.download_button("Télécharger les motifs d'exclusion", payload.encode("utf-8"),
+                           f"{Path(job['parameters']['name']).stem}_motifs_exclusions.jsonl",
+                           "application/x-ndjson", key="ft_exclusion_download")
+
+
 @st.fragment(run_every=1)
 def render_progress(runner, stale):
     job = runner.snapshot()
@@ -74,6 +94,7 @@ def render_progress(runner, stale):
     for column, (status, label) in zip(columns, (("propose", "Proposés"), ("valide", "Validés par toi"),
                                               ("a_revoir", "À revoir"), ("exclu", "Écartés"))):
         column.metric(label, counts[status])
+    render_exclusion_details(job)
     if runner.running:
         st.info("Passe en cours sur ce PC. Tu peux demander une pause ; elle prend effet après l'exemple en cours.")
         if st.button("Pause après l'exemple en cours", key="ft_pause"):
@@ -110,7 +131,8 @@ def render_progress(runner, stale):
             prompt = st.text_area("Consigne à relire / corriger", value=result["prompt"],
                 key=f"ft_prompt_{job['id']}_{selected}", disabled=runner.running or not result["eligible"])
             st.text(item["text"])
-            st.caption(result["reason"])
+            st.markdown("**Motif de l'exclusion**" if result["status"] == "exclu" else "**Motif du classement**")
+            st.text(result.get("reason") or "Motif non enregistré.")
         a, b = st.columns(2)
         accept = a.button("Valider cet exemple", disabled=runner.running or not result["eligible"], key="ft_accept")
         reject = b.button("Écarter cet exemple", disabled=runner.running, key="ft_reject")

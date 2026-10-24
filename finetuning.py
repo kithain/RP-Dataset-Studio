@@ -87,6 +87,29 @@ def source_text(data):
     return text, prompt
 
 
+def exclusion_report(job):
+    """Read existing decisions, with their exact reasons and grouped duplicate IDs."""
+    rows = []
+    groups = Counter()
+    for item in job["items"]:
+        result = job["results"].get(item["id"], {})
+        if result.get("status") != "exclu":
+            continue
+        stage = ("Décision manuelle" if result.get("human_review") else
+                 "Contrôles avant génération" if item.get("flags") else "Classement du modèle")
+        reason = result.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            reason = " ".join(flag for flag in item.get("flags", []) if isinstance(flag, str))
+            reason = reason or "Motif non enregistré dans cette ancienne sauvegarde."
+        rows.append({"Entrée": item["id"], "Ligne source": item["source_line"],
+                     "Étape": stage, "Motif": reason})
+        grouped = re.sub(r"\bDoublon du passage \d+\.", "Doublon de texte.", reason)
+        groups[(stage, grouped)] += 1
+    summary = [{"Étape": stage, "Motif regroupé": reason, "Entrées": count}
+               for (stage, reason), count in groups.most_common()]
+    return {"total": len(rows), "summary": summary, "rows": rows}
+
+
 def clean_text(text, clean):
     if not clean:
         return text

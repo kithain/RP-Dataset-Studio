@@ -3,10 +3,17 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.09b (alpha) — 24 octobre 2026.**
+**Version actuelle : 0.09c (alpha) — 24 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.09c
+
+- **Motifs d'exclusion visibles sous le compteur « Écartés »** : un encadré ouvert présente le résumé par motif et le détail de chaque entrée, avec son identifiant, sa ligne source, l'étape de décision et le motif exact enregistré. Les numéros de doublons sont regroupés dans le résumé ; chaque entrée y compte une fois, même si son motif cumule plusieurs critères. Les contrôles avant génération, le classement du modèle et les décisions manuelles sont distingués.
+- **Consultation immédiate des résultats existants** : actualiser la page suffit, sans repréparer le dataset ni relancer le modèle. Les motifs sont lus dans la progression et actualisés avec les compteurs. Le détail peut être téléchargé en JSONL sans inclure le texte du corpus ; lors de la comparaison d'une entrée, son motif est affiché explicitement. Une ancienne raison manquante reste signalée comme telle, avec reprise des contrôles enregistrés lorsqu'ils existent.
+
+**Validation : 221 tests automatisés réussis**, dont six nouveaux tests du rapport et de son affichage ; les 25 tests du préparateur passent également avec le Python portable. Ils couvrent le regroupement des doublons sans perdre les motifs exacts, les différentes étapes de décision, les raisons anciennes manquantes, l'absence de texte source dans le rapport, l'affichage d'une progression existante sans modification et le cas sans exclusion. Le test de rechargement des modules a aussi été étendu. La correction porte uniquement sur l'affichage et le rapport de décisions déjà enregistrées. Elle ne modifie ni les filtres, ni les résultats, ni les sauvegardes personnelles. La révision du générateur reste `narration-dataset-v2`.
 
 ## Changements de la version 0.09b
 

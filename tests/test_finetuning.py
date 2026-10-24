@@ -11,7 +11,7 @@ import zipfile
 from streamlit.testing.v1 import AppTest
 
 from core import Entry
-from finetuning import (VERSION, Runner, create_job, digest, export_bundle, process_item,
+from finetuning import (VERSION, Runner, create_job, digest, exclusion_report, export_bundle, process_item,
                         restore_checkpoint, save_checkpoint, source_parts, source_text)
 from finetuning_ui import PAGE
 from llm_tagging import QwenContextError, QwenError, QwenUnavailable
@@ -46,6 +46,48 @@ def read_bundle(blob):
 
 
 class TestFinetuning(unittest.TestCase):
+    def test_exclusion_report_groups_duplicate_ids_and_keeps_exact_reasons(self):
+        job = create_job(rows(4), "x", "m")
+        for index, item in enumerate(job["items"][:3]):
+            reason = f"Doublon du passage {index + 10}."
+            if index == 2:
+                reason = "Passage sexualisé détecté. " + reason
+            item["flags"] = [reason]
+            job["results"][item["id"]] = {"status": "exclu", "reason": reason}
+        before = deepcopy(job)
+        report = exclusion_report(job)
+        self.assertEqual(report["total"], 3)
+        self.assertEqual([row["Entrées"] for row in report["summary"]], [2, 1])
+        self.assertEqual(report["summary"][0]["Motif regroupé"], "Doublon de texte.")
+        self.assertEqual(report["rows"][0]["Motif"], "Doublon du passage 10.")
+        self.assertEqual(report["rows"][0]["Ligne source"], 1)
+        self.assertTrue(all(row["Étape"] == "Contrôles avant génération" for row in report["rows"]))
+        self.assertEqual(job, before)
+
+    def test_exclusion_report_distinguishes_model_manual_and_pending_decisions(self):
+        job = create_job(rows(4), "x", "m")
+        job["results"]["1"] = {"status": "exclu", "reason": "Contenu non narratif.", "human_review": False}
+        job["results"]["2"] = {"status": "exclu", "reason": "Décision manuelle.", "human_review": True}
+        job["results"]["3"] = {"status": "a_revoir", "reason": "Doute."}
+        report = exclusion_report(job)
+        self.assertEqual(report["total"], 2)
+        self.assertEqual([row["Étape"] for row in report["rows"]], ["Classement du modèle", "Décision manuelle"])
+        self.assertEqual([row["Entrée"] for row in report["rows"]], ["1", "2"])
+
+    def test_exclusion_report_handles_older_missing_reasons_without_inventing_one(self):
+        job = create_job(rows(2), "x", "m")
+        job["results"] = {"1": {"status": "exclu"}, "2": {"status": "exclu", "reason": ""}}
+        job["items"][0]["flags"] = ["Doublon du passage 7."]
+        report = exclusion_report(job)
+        self.assertEqual(report["rows"][0]["Motif"], "Doublon du passage 7.")
+        self.assertIn("non enregistré", report["rows"][1]["Motif"])
+
+    def test_exclusion_report_does_not_include_source_text_or_other_statuses(self):
+        job = create_job(rows(), "x", "m")
+        self.assertEqual(exclusion_report(job), {"total": 0, "summary": [], "rows": []})
+        job["results"]["1"] = {"status": "exclu", "reason": "Doublon du passage 2."}
+        self.assertNotIn(TEXT, json.dumps(exclusion_report(job), ensure_ascii=False))
+
     def test_prepare_is_copy_only_and_tracks_cleaning_and_dedup(self):
         data = rows()
         data[0].data["messages"][1]["content"] = "Chapitre 2\n\n" + TEXT + "\n* * *\n"
@@ -284,6 +326,44 @@ class TestFinetuningUI(unittest.TestCase):
         next(r for r in app.radio if r.label == "Navigation").set_value(PAGE).run()
         self.assertFalse(app.exception)
         return app
+
+    def test_existing_exclusions_show_summary_and_exact_line_without_reprocessing(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"), \
+                patch("qwen_ui.LocalQwen.load") as load, \
+                patch("finetuning_ui.generate_for_config") as generate:
+            data = rows(3)
+            data[1].data = deepcopy(data[0].data)
+            data[2].data = deepcopy(data[0].data)
+            app = self.open_page(data)
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            job = app.session_state.ft_runner.snapshot()
+            path = Path(app.session_state.ft_runner.checkpoint)
+            saved = path.read_bytes()
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(path.read_bytes(), saved)
+            self.assertEqual(app.session_state.ft_runner.snapshot(), job)
+            self.assertTrue(any(exp.label == "Motifs des exclusions (2)" for exp in app.expander))
+            summary = next(frame.value for frame in app.dataframe if "Motif regroupé" in frame.value.columns)
+            detail = next(frame.value for frame in app.dataframe if "Ligne source" in frame.value.columns)
+            self.assertEqual(summary["Entrées"].tolist(), [2])
+            self.assertEqual(detail["Entrée"].tolist(), ["2", "3"])
+            self.assertEqual(detail["Motif"].tolist(), ["Doublon du passage 1."] * 2)
+            self.assertEqual(detail["Ligne source"].tolist(), [2, 3])
+            load.assert_not_called()
+            generate.assert_not_called()
+
+    def test_no_exclusion_does_not_display_empty_exclusion_tables(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"):
+            app = self.open_page(rows())
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(any(exp.label.startswith("Motifs des exclusions") for exp in app.expander))
 
     def test_three_message_dataset_can_prepare_preview_and_display_system(self):
         data = rows(4)
