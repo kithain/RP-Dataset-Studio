@@ -3,10 +3,18 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.09a (alpha) — 24 octobre 2026.**
+**Version actuelle : 0.09b (alpha) — 24 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.09b
+
+- **Lecture des conversations avec message système corrigée** : le préparateur de narration accepte `user → assistant` et `system → user → assistant`, ainsi que leurs équivalents ShareGPT/Alpaca textuels. Le système initial est conservé exactement dans les sauvegardes et les exports JSONL, visible lors de la relecture, et recensé dans le bilan/provenance. Il reste une donnée du corpus : il n'est pas utilisé comme instruction du modèle de préparation. Les véritables conversations à plusieurs tours, ordres invalides, appels d'outils et contenus multimodaux restent à revoir sans suppression silencieuse de messages.
+- **Diagnostic de préparation lisible** : le nombre de passages restant à envoyer au modèle et les motifs des contrôles avant génération sont affichés. Si tous les passages sont mis de côté, l'interface l'explique. Un format non pris en charge n'ajoute plus le faux motif « passage trop court ».
+- **Anciennes préparations conservées séparément** : le lecteur passe à la révision `narration-dataset-v2`. Après mise à jour, cliquer sur **Préparer / reprendre le dataset**, même si l'ancien compteur affichait déjà toutes les entrées traitées. Cette action relit le dataset avec la correction et crée une sauvegarde distincte, sans charger le modèle. Les anciennes sessions demandent cette préparation avant de pouvoir générer ; les modules locaux sont actualisés sans décharger le modèle partagé. Cliquer ensuite sur **Générer un aperçu (3 exemples)** pour lancer un essai.
+
+**Validation : 215 tests automatisés réussis**, dont sept nouveaux tests couvrant les systèmes facultatifs, leur conservation dans les sauvegardes/exports, ShareGPT et Alpaca, les contenus non pris en charge, les anciennes préparations et les diagnostics d'interface. Les 19 tests du préparateur et de son interface passent aussi avec le Python portable ; le test existant de rechargement a été étendu aux nouveaux modules. Le lecteur corrigé reconnaît les 1 268 lignes du fichier signalé et conserve leurs trois textes à l'identique ; le fichier source et son ancienne sauvegarde restent inchangés. Les tests d'aperçu et d'export utilisent des données fictives et des appels de modèle simulés ; aucune inférence n'est lancée sur le corpus personnel.
 
 ## Changements de la version 0.09a
 

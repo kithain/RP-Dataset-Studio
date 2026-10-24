@@ -47,6 +47,8 @@ import qwen_ui
 import llm_tagging
 import book_generation
 import book_ui
+import finetuning
+import finetuning_ui
 
 row = core.Entry(11, {"text": "Romance"}, 4)
 pool = qwen_ui.clients()
@@ -61,6 +63,8 @@ del llm_tagging.generate_json
 del qwen_ui.generate_book
 del book_generation.validate_narration
 book_ui.render_book_page = lambda on_load: None
+del finetuning.source_parts
+finetuning_ui.render_finetuning_page = lambda rows, name, sources=None: None
 
 app = AppTest.from_file(str(Path("app.py").resolve()), default_timeout=30)
 app.session_state.rows = [row]
@@ -77,6 +81,8 @@ assert callable(llm_tagging.generate_json)
 assert callable(qwen_ui.generate_book)
 assert callable(book_generation.validate_narration)
 assert "generator_version" in __import__("inspect").signature(book_ui.render_book_page).parameters
+assert callable(finetuning.source_parts)
+assert "generator_version" in __import__("inspect").signature(finetuning_ui.render_finetuning_page).parameters
 assert "resolve_classification" in __import__("inspect").signature(tagging.normalize_tags).parameters
 assert app.session_state.rows[0] is row
 assert app.session_state.history == [{"kind": "lang", "before": [(11, None)]}]

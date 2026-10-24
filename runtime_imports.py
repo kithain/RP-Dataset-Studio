@@ -18,6 +18,8 @@ REQUIRED_API = (
     ("qwen_ui", {"generate_book": (), "generate_for_config": ()}),
     ("book_generation", {"validate_narration": ()}),
     ("book_ui", {"render_book_page": ("generator_version",)}),
+    ("finetuning", {"source_parts": ()}),
+    ("finetuning_ui", {"render_finetuning_page": ("generator_version",)}),
 )
 
 

@@ -11,8 +11,8 @@ import zipfile
 from streamlit.testing.v1 import AppTest
 
 from core import Entry
-from finetuning import (Runner, create_job, digest, export_bundle, process_item,
-                        restore_checkpoint, save_checkpoint, source_text)
+from finetuning import (VERSION, Runner, create_job, digest, export_bundle, process_item,
+                        restore_checkpoint, save_checkpoint, source_parts, source_text)
 from finetuning_ui import PAGE
 from llm_tagging import QwenContextError, QwenError, QwenUnavailable
 from qwen_ui import RULES
@@ -68,6 +68,86 @@ class TestFinetuning(unittest.TestCase):
             source_text(multi)
         job = create_job([Entry(1, multi, 1)], "x", "m")
         self.assertFalse(job["results"]["1"]["eligible"])
+        self.assertNotIn("trop court", job["results"]["1"]["reason"])
+
+    def test_optional_system_is_kept_in_checkpoint_exports_and_review(self):
+        system = "Tu écris des scènes françaises.\nConserve les apostrophes d’origine et le présent."
+        data = rows()
+        data[0].data["messages"].insert(0, {"role": "system", "content": system})
+        before = deepcopy(data)
+        source = source_parts(data[0].data)
+        self.assertEqual(source, (data[0].data["messages"][-1]["content"], "Ancienne demande.", system))
+        self.assertEqual(source_text(data[0].data), source[:2])
+        job = create_job(data, "system_demo.jsonl", "teacher")
+        self.assertFalse(job["results"])
+        generate = Mock(side_effect=generated)
+        job["results"]["1"] = process_item(job["items"][0], generate)
+        # A source system prompt is preserved as data, never promoted to teacher instructions.
+        self.assertTrue(all(system not in " ".join(call.args) for call in generate.call_args_list))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            save_checkpoint(job, path)
+            restored = create_job(data, "system_demo.jsonl", "teacher")
+            restore_checkpoint(restored, path.read_bytes())
+            self.assertEqual(restored["items"][0]["system"], system)
+        blob, summary = export_bundle(job, include_proposals=True)
+        exported = read_bundle(blob)
+        for filename in ("dataset.jsonl", "train.jsonl"):
+            messages = exported[filename][0]["messages"]
+            self.assertEqual([m["role"] for m in messages], ["system", "user", "assistant"])
+            self.assertEqual(messages[0]["content"], system)
+            self.assertEqual(messages[1]["content"], PROMPT)
+            self.assertEqual(messages[2]["content"], source[0])
+        self.assertEqual(summary["with_system"], 1)
+        self.assertEqual(exported["provenance.jsonl"][0]["system_sha256"], digest(system))
+        review, _ = export_bundle(job)
+        self.assertEqual(read_bundle(review)["a_revoir.jsonl"][0]["system"], system)
+        self.assertEqual(data, before)
+
+    def test_optional_system_supports_sharegpt_alpaca_and_empty_system(self):
+        records = [
+            {"conversations": [{"from": "système", "value": "Écris en français."},
+                               {"from": "human", "value": "Raconte la scène."},
+                               {"from": "gpt", "value": TEXT}]},
+            {"system": "Écris en français.", "instruction": "Raconte la scène.", "output": TEXT},
+            {"messages": [{"role": "system", "content": ""},
+                          {"role": "user", "content": "Raconte la scène."},
+                          {"role": "assistant", "content": TEXT}]},
+            {"system": "", "instruction": "Raconte la scène.", "output": TEXT},
+        ]
+        for index, record in enumerate(records):
+            with self.subTest(index=index):
+                answer, prompt, system = source_parts(record)
+                self.assertEqual(answer, TEXT)
+                self.assertEqual(prompt, "Raconte la scène.")
+                self.assertEqual(system, "" if index >= 2 else "Écris en français.")
+                job = create_job([Entry(1, record, 1)], "system.jsonl", "m")
+                self.assertNotIn("1", job["results"])
+        self.assertEqual(source_parts({"text": TEXT, "system": "Français."}), (TEXT, "", "Français."))
+
+    def test_bad_system_order_tools_multiturn_and_multimodal_remain_rejected(self):
+        user = {"role": "user", "content": "Raconte."}
+        assistant = {"role": "assistant", "content": TEXT}
+        system = {"role": "system", "content": "Style français."}
+        sequences = [
+            [user, system, assistant], [system, system, user, assistant],
+            [system, user, assistant, user, assistant],
+            [user, dict(assistant, tool_calls=[{"id": "call"}])],
+            [user, {"role": "assistant", "content": [{"type": "text", "text": TEXT}]}],
+            [user, {"role": "unknown", "content": TEXT}],
+            [system, {"role": "user", "content": ""}, assistant],
+        ]
+        for index, sequence in enumerate(sequences):
+            with self.subTest(index=index), self.assertRaises(ValueError):
+                source_parts({"messages": sequence})
+
+    def test_previous_reader_checkpoint_is_not_reused(self):
+        job = create_job(rows(), "x", "m")
+        old = deepcopy(job)
+        old["parameters"]["version"] = "narration-dataset-v1"
+        self.assertNotEqual(VERSION, old["parameters"]["version"])
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            restore_checkpoint(job, json.dumps(old))
 
     def test_generation_keeps_target_and_uses_new_consigne_not_old_prompt(self):
         job = create_job(rows(), "x", "m")
@@ -194,6 +274,80 @@ class TestFinetuning(unittest.TestCase):
 
 
 class TestFinetuningUI(unittest.TestCase):
+    def open_page(self, data):
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=30)
+        app.session_state.rows = data
+        app.session_state.dataset_name = "system_demo.jsonl"
+        app.session_state.tagging_engine = RULES
+        app.session_state.ft_model = "not-loaded.gguf"
+        app.run()
+        next(r for r in app.radio if r.label == "Navigation").set_value(PAGE).run()
+        self.assertFalse(app.exception)
+        return app
+
+    def test_three_message_dataset_can_prepare_preview_and_display_system(self):
+        data = rows(4)
+        for row in data:
+            row.data["messages"].insert(0, {"role": "system", "content": "Écris des scènes en français."})
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"), \
+                patch("qwen_ui.LocalQwen.load") as load:
+            app = self.open_page(data)
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            state = app.session_state.ft_runner.snapshot()
+            self.assertFalse(state["results"])
+            self.assertTrue(all(item["system"] == "Écris des scènes en français." for item in state["items"]))
+            self.assertFalse(next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").disabled)
+            def fake(config, *args, _pool=None, **kwargs):
+                return generated(*args, **kwargs)
+            with patch("finetuning_ui.QwenConfig.validate"), patch("finetuning_ui.generate_for_config", side_effect=fake):
+                next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").click().run()
+                app.session_state.ft_runner.thread.join(5)
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(app.session_state.ft_runner.snapshot()["results"]), 3)
+            self.assertTrue(any("Message système conservé" in expander.label for expander in app.expander))
+            load.assert_not_called()
+
+    def test_legacy_session_requires_prepare_and_preserves_previous_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"), \
+                patch("qwen_ui.LocalQwen.load") as load:
+            app = self.open_page(rows())
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            old = app.session_state.ft_runner.snapshot()
+            old["parameters"]["version"] = "narration-dataset-v1"
+            old["id"] = "legacy_state"
+            path = Path(directory) / "legacy.json"
+            save_checkpoint(old, path)
+            original = path.read_bytes()
+            app.session_state.ft_runner = Runner(old, path)
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("ancien lecteur" in message.value for message in app.warning))
+            self.assertTrue(next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").disabled)
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state.ft_runner.snapshot()["parameters"]["version"], VERSION)
+            self.assertEqual(path.read_bytes(), original)
+            load.assert_not_called()
+
+    def test_all_incompatible_records_show_reason_without_a_false_shortness_warning(self):
+        data = rows()
+        data[0].data["messages"].append({"role": "user", "content": "Suite ?"})
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"):
+            app = self.open_page(data)
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any("Aucun passage" in message.value for message in app.warning))
+            self.assertTrue(any("plusieurs tours" in text.value for text in app.text))
+            self.assertFalse(any("trop court" in text.value for text in app.text))
+
     def test_open_and_prepare_never_load_model_and_stale_settings_disable_generation(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch("finetuning_ui.CHECKPOINTS", Path(directory)), \

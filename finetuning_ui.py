@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from collections import Counter
 from functools import partial
 import json
 from pathlib import Path
 
 import streamlit as st
 
-from finetuning import Runner, create_job, digest, export_bundle, restore_checkpoint, save_checkpoint
+from finetuning import VERSION, Runner, create_job, digest, export_bundle, restore_checkpoint, save_checkpoint
 from install_assets import resolve_setting
 from llm_tagging import BASE, DEFAULT_SERVER, QwenConfig, QwenError
 from memory_guard import memory_snapshot
@@ -96,6 +97,9 @@ def render_progress(runner, stale):
             format_func=lambda key: f"Entrée {key} · {job['results'][key]['status']}", key=f"ft_select_{job['id']}")
         item = next(item for item in completed if item["id"] == selected)
         result = job["results"][selected]
+        if item.get("system") is not None:
+            with st.expander("Message système conservé dans les exports"):
+                st.text(item["system"])
         left, right = st.columns(2)
         with left:
             st.markdown("**Avant : consigne et réponse sources**")
@@ -132,9 +136,9 @@ def render_progress(runner, stale):
             f"{Path(job['parameters']['name']).stem}_narration_fr.zip", "application/zip", key="ft_download")
 
 
-def render_finetuning_page(rows, name, sources=None):
+def render_finetuning_page(rows, name, sources=None, *, generator_version=VERSION):
     st.title("🛠️ Préparer un dataset de narration française")
-    st.write("Transforme tes textes bruts ou tes paires consigne/réponse en nouveaux exemples pour le "
+    st.write("Transforme tes textes bruts ou tes paires consigne/réponse, avec message système facultatif, en nouveaux exemples pour le "
              "fine-tuning. Le GGUF sert à construire et contrôler les consignes ; le futur Qwen 9B "
              "sera entraîné plus tard avec les exports.")
     keys = initialize_settings()
@@ -215,9 +219,23 @@ def render_finetuning_page(rows, name, sources=None):
     if runner is None:
         st.caption("Préparer effectue seulement les contrôles de structure. La génération nécessite ensuite un clic explicite.")
         return
-    stale = st.session_state.get("ft_signature") != signature
     state = runner.snapshot()
+    legacy = state["parameters"].get("version") != generator_version
+    stale = legacy or st.session_state.get("ft_signature") != signature
+    if legacy:
+        st.warning("Cette préparation utilise l'ancien lecteur de conversations. Clique sur Préparer / reprendre "
+                   "pour reconnaître les messages système. L'ancienne sauvegarde reste conservée séparément.")
     pending = len(state["items"]) - len(state["results"])
+    structural = [item for item in state["items"] if item["flags"]]
+    st.info(f"{pending} passage(s) restant(s) pour le modèle · "
+            f"{len(structural)} mis de côté lors des contrôles avant génération.")
+    if structural:
+        with st.expander("Motifs des contrôles avant génération"):
+            for reason, count in Counter(reason for item in structural for reason in item["flags"]).most_common():
+                st.text(f"{count} entrée(s) : {reason}")
+    if not pending and len(structural) == len(state["items"]) and not legacy:
+        st.warning("Aucun passage n'est prêt pour la génération. Consulte les motifs ci-dessus ; "
+                   "charger le modèle ne modifiera pas ces contrôles de format ou de contenu.")
     st.caption("Sans provenance de livre, le découpage train/validation se base sur l'ordre des lignes "
                "du fichier. Les groupes de 16 passages et leur marge de 2 limitent les voisinages ; "
                "ils ne remplacent pas une séparation par chapitre ou par livre contrôlée manuellement.")
