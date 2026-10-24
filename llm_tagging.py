@@ -18,6 +18,7 @@ import urllib.request
 
 from tagging import TAG_RULES, _containers, _text_parts, _TEXT_KEYS, normalize_tags
 from install_assets import model_path, runtime_path
+from memory_guard import MemoryGuard
 
 
 BASE = Path(__file__).resolve().parent
@@ -75,6 +76,10 @@ class QwenUnavailable(QwenError):
     """An infrastructure failure that should interrupt a batch."""
 
 
+class QwenContextError(QwenError):
+    """Input does not fit; leave it for review while continuing other examples."""
+
+
 @dataclass(frozen=True)
 class QwenConfig:
     backend: str = "gguf"
@@ -82,10 +87,25 @@ class QwenConfig:
     server: str = DEFAULT_SERVER
     python: str = DEFAULT_PYTHON
     comfy: str = DEFAULT_COMFY
+    gpu_layers: int = 99
+    context: int = 8192
+    batch: int = 128
+    ubatch: int = 64
+    cache_mib: int = 1024
+    low_memory: bool = False
+    reserve_ram_gib: float = 5.0
+    reserve_vram_mib: int = 1536
 
     def validate(self):
         if self.backend not in ("gguf", "comfy"):
             raise QwenError("Moteur Qwen inconnu.")
+        if (type(self.gpu_layers) is not int or not 0 <= self.gpu_layers <= 999 or
+                type(self.context) is not int or not 2048 <= self.context <= 32768 or
+                type(self.batch) is not int or not 32 <= self.batch <= 512 or
+                type(self.ubatch) is not int or not 16 <= self.ubatch <= self.batch or
+                type(self.cache_mib) is not int or not 0 <= self.cache_mib <= 2048 or
+                not 0 <= self.reserve_ram_gib <= 64 or not 0 <= self.reserve_vram_mib <= 65536):
+            raise QwenError("Réglages de mémoire Qwen invalides.")
         for label, path in (("Modèle", self.model),
                             ("llama-server" if self.backend == "gguf" else "Python ComfyUI",
                              self.server if self.backend == "gguf" else self.python)):
@@ -109,6 +129,8 @@ class LocalQwen:
         self._lock = threading.RLock()
         self._http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.url = None
+        self._guard = None
+        self._memory_error = None
         atexit.register(self.close)
 
     @property
@@ -117,6 +139,9 @@ class LocalQwen:
 
     def close(self):
         with self._lock:
+            if getattr(self, "_guard", None):
+                self._guard.close()
+                self._guard = None
             if self.process is not None:
                 if self.process.poll() is None:
                     self.process.terminate()
@@ -133,6 +158,16 @@ class LocalQwen:
                 self._log.close()
                 self._log = None
             self.url = None
+
+    def _memory_stop(self, reason):
+        # Do not acquire the request lock: an inference may be waiting on HTTP.
+        self._memory_error = reason
+        child = self.process
+        if child is not None and child.poll() is None:
+            try:
+                child.terminate()
+            except OSError:
+                pass
 
     def _diagnostic(self):
         if self._log is None:
@@ -175,6 +210,7 @@ class LocalQwen:
                 return
             self.close()
             self.config.validate()
+            self._memory_error = None
             self._log = tempfile.TemporaryFile()
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
             try:
@@ -184,14 +220,28 @@ class LocalQwen:
                         port = sock.getsockname()[1]
                     self.url = f"http://127.0.0.1:{port}"
                     command = [self.config.server, "-m", self.config.model, "--host", "127.0.0.1",
-                               "--port", str(port), "-c", "8192", "-ngl", "99", "-np", "1",
+                               "--port", str(port), "-c", str(self.config.context),
+                               "-ngl", str(self.config.gpu_layers), "-np", "1",
+                               "-b", str(self.config.batch), "-ub", str(self.config.ubatch),
+                               "--cache-ram", str(self.config.cache_mib), "--offline", "--no-webui",
                                "--no-context-shift", "--reasoning-budget", "0",
                                "--chat-template-kwargs", '{"enable_thinking":false}']
+                    if self.config.low_memory:
+                        command += ["--load-mode", "none", "--no-repack", "--reasoning", "off"]
+                        self._guard = MemoryGuard(self.config.reserve_ram_gib,
+                                                  self.config.reserve_vram_mib, self._memory_stop)
+                        reason = self._guard.check()
+                        if reason:
+                            raise QwenUnavailable(reason)
                     self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                                     stdout=self._log, stderr=self._log,
                                                     creationflags=flags)
+                    if self._guard:
+                        self._guard.start()
                     deadline = time.monotonic() + self.timeout
                     while time.monotonic() < deadline:
+                        if self._memory_error:
+                            raise QwenUnavailable(self._memory_error)
                         if not self.running:
                             raise QwenError("Le serveur Qwen s'est arrêté. " + self._diagnostic())
                         try:
@@ -213,7 +263,7 @@ class LocalQwen:
                 self._request({"op": "load"})
             except Exception as exc:
                 self.close()
-                raise QwenUnavailable(str(exc)) from exc
+                raise QwenUnavailable(self._memory_error or str(exc)) from exc
 
     def generate(self, system: str, prompt: str) -> str:
         return generate_json(self, system, prompt, schema=RESULT_SCHEMA, max_tokens=512)
@@ -236,9 +286,16 @@ def generate_json(client, system: str, prompt: str, *, schema: dict,
                 if result.get("truncated"):
                     raise QwenError("Réponse Qwen tronquée ; résultat non enregistré.")
                 return result["text"]
+            messages = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+            if getattr(client.config, "low_memory", False):
+                rendered = client._json_http("/apply-template", {"messages": messages,
+                    "add_generation_prompt": True, "chat_template_kwargs": {"enable_thinking": False}})
+                tokens = client._json_http("/tokenize", {"content": rendered["prompt"],
+                                                        "add_special": True})["tokens"]
+                if len(tokens) + max_tokens + 64 > client.config.context:
+                    raise QwenContextError("Passage trop long pour le contexte choisi ; aucune troncature appliquée.")
             result = client._json_http("/v1/chat/completions", {
-                "model": "local", "messages": [{"role": "system", "content": system},
-                                                  {"role": "user", "content": prompt}],
+                "model": "local", "messages": messages,
                 "temperature": 0, "max_tokens": max_tokens,
                 "chat_template_kwargs": {"enable_thinking": False},
                 "response_format": {"type": "json_schema", "json_schema": {
@@ -247,9 +304,12 @@ def generate_json(client, system: str, prompt: str, *, schema: dict,
             if choice.get("finish_reason") != "stop":
                 raise QwenError("Réponse Qwen incomplète ; résultat non enregistré.")
             return choice["message"]["content"]
+        except QwenContextError:
+            raise
         except Exception as exc:
             client.close()
-            raise QwenUnavailable(f"Génération Qwen impossible : {exc}") from exc
+            reason = getattr(client, "_memory_error", None) or str(exc)
+            raise QwenUnavailable(f"Génération Qwen impossible : {reason}") from exc
 
 
 def record_text(data: dict) -> str:

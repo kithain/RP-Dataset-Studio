@@ -20,6 +20,7 @@ refresh_cached_modules()
 from split_export import export_split_zip
 from merge_ui import render_merge_page
 from book_ui import render_book_page
+from finetuning_ui import render_finetuning_page, PAGE as FINETUNING_PAGE
 from conversion_ui import render_conversion_panel
 from tagging import entry_tags
 from tagging_ui import render_tag_editor, render_tag_panel
@@ -367,7 +368,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.08b")
+    st.caption("Gestion locale de datasets JDR · v0.09a")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
@@ -401,7 +402,7 @@ with st.sidebar:
                      use_container_width=True):
             undo()
             st.rerun()
-    page = st.radio("Navigation", ["🔎 Explorer", "📖 Depuis un livre", "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
+    page = st.radio("Navigation", ["🔎 Explorer", "📖 Depuis un livre", FINETUNING_PAGE, "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
                     key="navigation_page", label_visibility="collapsed")
     st.divider()
     st.caption("🔒 Fichiers traités localement. Aucune donnée envoyée à un service externe."
@@ -413,6 +414,10 @@ if page == "🧩 Fusionner":
 
 if page == "📖 Depuis un livre":
     render_book_page(loaded)
+    st.stop()
+
+if page == FINETUNING_PAGE:
+    render_finetuning_page(rows, st.session_state.dataset_name, st.session_state.get("entry_sources"))
     st.stop()
 
 if not st.session_state.dataset_name:

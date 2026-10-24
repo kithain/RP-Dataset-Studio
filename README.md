@@ -3,10 +3,31 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.08b (alpha) — 23 octobre 2026.**
+**Version actuelle : 0.09a (alpha) — 24 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.09a
+
+- **Page « 🛠️ Fine-tuning FR »** : prépare un nouveau dataset de narration à partir de textes bruts (`text` / `content`) ou de paires utilisateur/assistant importées. Le GGUF local construit les consignes et contrôle leur fidélité ; le texte de la réponse vient du corpus, avec le nettoyage de forme choisi. Aucun entraînement du modèle de préparation ou du futur modèle cible n'est lancé.
+- **Déclenchement contrôlé** : ouvrir la page et cliquer sur Préparer ne chargent aucun modèle. Aperçu de trois exemples, traitement complet, pause après l'exemple en cours et reprise par sauvegarde sont explicites. Le travail s'effectue en arrière-plan pour laisser le bouton Pause accessible. Les réussites sont sauvegardées après chaque exemple ; une panne de moteur arrête la passe sans effacer les résultats.
+- **Gros GGUF et mémoire** : réglages indépendants du moteur de tags, couches GPU, contexte, batch/microbatch, cache de préfixes plafonné et réserves RAM/VRAM. Le profil utilise une seule requête, sans repacking ni mmap, sans accélération MTP. Un contrôle avant chargement puis une surveillance périodique arrêtent uniquement le processus de modèle appartenant à l'application si la réserve est atteinte. Le moteur reste partagé : un seul modèle actif entre les pages. Cette surveillance n'est pas un plafond mémoire strict ; sans `nvidia-smi`, la mesure VRAM est indisponible. Avec plusieurs GPU NVIDIA, le minimum de VRAM libre est utilisé.
+- **Qualité et relecture** : doublons de texte normalisé, pages éditoriales, formats incompatibles, tailles extrêmes et certains termes sexualisés sont signalés avant le modèle. Le parcours vise la narration non sexualisée : les autres cas ou les doutes sont mis de côté. Après classement, une nouvelle consigne française est générée, puis vérifiée lors d'un appel distinct. Les contrôles de langue, de vocabulaire et le jugement du même modèle restent imparfaits. Comparaison avant/après, correction de consigne et validation manuelle sont disponibles ; les conversations à plusieurs tours ne sont jamais aplaties en silence.
+- **Export séparé pour le fine-tuning** : archive ZIP contenant `dataset.jsonl`, `train.jsonl`, `validation.jsonl`, `marge.jsonl`, `a_revoir.jsonl`, `exclusions.jsonl`, `provenance.jsonl`, `bilan.json` et une notice. Les messages sont compatibles avec un entraînement conversationnel ; appliquer plus tard le tokenizer et le chat template du modèle cible. Par défaut, seuls les exemples validés manuellement entrent dans le dataset ; une option explicite inclut les propositions non relues. Le fichier importé et le dataset ouvert dans Explorer restent inchangés.
+- **Séparation prudente des données** : groupes de 16 passages d'une même source et marge de deux passages voisins hors train/validation ; doublons exacts après normalisation retirés avant génération. La sélection de groupes de validation et le mélange du train sont reproductibles. Sans métadonnées `book_source`, l'ordre des lignes du fichier sert de repère : il ne garantit pas une séparation par livre ou chapitre. Un seul groupe donne une validation vide ; les paraphrases et recouvrements lointains restent à examiner.
+
+**Validation : 208 tests automatisés réussis**, dont 17 nouveaux tests du préparateur, de son interface et de la surveillance mémoire. Les nouveaux tests passent aussi avec le Python portable. Ils couvrent l'absence de chargement à l'ouverture/préparation, les cibles conservées, la relecture, les exclusions, l'aperçu de trois exemples, la pause, la reprise, l'arrêt mémoire, le refus d'une entrée trop longue sans troncature et la séparation des exports. Les essais de cette version utilisent des scènes fictives non sexualisées et des appels de modèle simulés ; aucun retraitement du corpus personnel ni chargement du GGUF 27B n'est nécessaire à ces vérifications.
+
+### Utiliser le préparateur de narration
+
+1. Ouvrir son dataset depuis la barre latérale. Pour éviter tout chargement à l'import, décocher d'abord « Ajouter les tags automatiquement à l'import ».
+2. Ouvrir **🛠️ Fine-tuning FR**, renseigner son fichier GGUF et `llama-server.exe` dans **Modèle GGUF et mémoire**. Le runtime fourni est llama.cpp b11819 ; un autre serveur doit prendre en charge les mêmes options et les routes `/apply-template`, `/tokenize` et `/v1/chat/completions`.
+3. Commencer avec les réglages proposés : 32 couches GPU, contexte de 4 096 tokens, batch 128, microbatch 64, cache de 1 024 Mio, réserves de 5 Gio de RAM et 1 536 Mio de VRAM. Ce point de départ dépend du modèle et du matériel : mesurer la mémoire libre, réduire les couches GPU si nécessaire et vérifier le message d'arrêt. Le contexte comprend l'entrée et la sortie ; un passage trop long est refusé, jamais tronqué silencieusement. Le microbatch doit rester inférieur ou égal au batch.
+4. Cliquer sur **Préparer / reprendre le dataset**, puis **Générer un aperçu (3 exemples)**. Relire les consignes et les réponses. **Traiter tout / reprendre** continue uniquement sur les entrées restantes ; **Pause après l'exemple en cours** conserve les exemples terminés.
+5. Corriger puis valider les exemples souhaités. Préparer l'archive JSONL et la télécharger. Un export est possible avant la fin ; consulter `bilan.json` pour connaître sa complétude et ses compteurs.
+
+Les réglages du préparateur sont enregistrés localement dans `finetuning_settings.json` au clic sur Enregistrer. Les sauvegardes de travail résident dans `data/finetuning/`. Après fermeture, rouvrir le même dataset avec les mêmes réglages et cliquer sur Préparer / reprendre. Un changement du contenu, du modèle (chemin, taille ou date), des réglages de mémoire ou du nettoyage crée une progression distincte. Ces fichiers locaux sont exclus de Git.
 
 ## Changements de la version 0.08b
 
@@ -259,6 +280,8 @@ Dans un terminal ouvert dans le dossier :
 - `merge_datasets.py` et `merge_ui.py` : analyse et interface de fusion de plusieurs sources.
 - `conversation_conversion.py` et `conversion_ui.py` : analyse, aperçu et conversion des conversations récupérables.
 - `split_export.py` : découpage des exports JSONL dans une archive ZIP.
+- `finetuning.py` et `finetuning_ui.py` : préparation, aperçu, relecture, pause/reprise et export d'une nouvelle base de narration française.
+- `memory_guard.py` : mesure de mémoire libre et surveillance du processus GGUF appartenant à l'application.
 - `tagging.py` et `tagging_ui.py` : suggestions de tags, édition, analyse par lot et statistiques.
 - `llm_tagging.py`, `qwen_worker.py` et `qwen_ui.py` : analyse sémantique, processus locaux GGUF/ComfyUI et configuration.
 - `evaluate_qwen.py` et `EVALUATION_QWEN.md` : essais reproductibles avec les vrais modèles et résultats observés.

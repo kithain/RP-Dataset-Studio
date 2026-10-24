@@ -14,8 +14,8 @@ REQUIRED_API = (
     ("core", {"purge_deleted": (), "apply_filters": ("tag_mode", "tag_status")}),
     ("tag_management", {"untagged_entries": ()}),
     ("tagging_ui", {"analyze_tag_batch": ()}),
-    ("llm_tagging", {"generate_json": ()}),
-    ("qwen_ui", {"generate_book": ()}),
+    ("llm_tagging", {"generate_json": (), "QwenConfig": ("low_memory",)}),
+    ("qwen_ui", {"generate_book": (), "generate_for_config": ()}),
     ("book_generation", {"validate_narration": ()}),
     ("book_ui", {"render_book_page": ("generator_version",)}),
 )

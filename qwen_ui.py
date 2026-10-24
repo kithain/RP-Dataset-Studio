@@ -46,7 +46,6 @@ class ClientPool:
         with self.lock:
             self.get(config).load()
 
-
 @st.cache_resource(show_spinner=False)
 def clients():
     return ClientPool()
@@ -133,6 +132,13 @@ def generate_book(system, prompt, *, schema, max_tokens):
     with pool.lock:
         return generate_json(pool.get(current_config()), system, prompt,
                              schema=schema, max_tokens=max_tokens)
+
+
+def generate_for_config(config, system, prompt, *, schema, max_tokens, _pool=None):
+    """Explicit configuration, usable by a worker without Streamlit session access."""
+    pool = _pool if _pool is not None else clients()
+    with pool.lock:
+        return generate_json(pool.get(config), system, prompt, schema=schema, max_tokens=max_tokens)
 
 
 def annotate_rows(rows):
