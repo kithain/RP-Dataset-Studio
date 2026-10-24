@@ -83,6 +83,26 @@ def render_exclusion_details(job):
                            "application/x-ndjson", key="ft_exclusion_download")
 
 
+def render_preparation_report(job):
+    pending = len(job["items"]) - len(job["results"])
+    structural = [item for item in job["items"] if item["flags"]]
+    warnings = [item for item in job["items"] if item.get("warnings")]
+    st.info(f"{pending} passage(s) restant(s) pour le modèle · "
+            f"{len(structural)} doublon(s) ou erreur(s) de structure.")
+    if structural:
+        with st.expander("Motifs des contrôles avant génération"):
+            for reason, count in Counter(reason for item in structural for reason in item["flags"]).most_common():
+                st.text(f"{count} entrée(s) : {reason}")
+    if warnings:
+        with st.expander(f"Avertissements sans exclusion ({len(warnings)} entrées)"):
+            st.caption("Ces passages restent disponibles pour le modèle. Tu décides de leur validation.")
+            for reason, count in Counter(reason for item in warnings for reason in item["warnings"]).most_common():
+                st.text(f"{count} entrée(s) : {reason}")
+    if not pending and len(structural) == len(job["items"]):
+        st.warning("Aucun passage n'est prêt pour la génération. Consulte les motifs ci-dessus ; "
+                   "charger le modèle ne corrigera pas les doublons ou les formats non pris en charge.")
+
+
 @st.fragment(run_every=1)
 def render_progress(runner, stale):
     job = runner.snapshot()
@@ -145,7 +165,11 @@ def render_progress(runner, stale):
     st.subheader("Exporter une nouvelle base")
     st.caption("Par défaut, seuls les exemples validés par toi sont placés dans le dataset d'entraînement. "
                "Les propositions automatiques et les cas douteux sont conservés séparément pour relecture.")
-    include = st.checkbox("Inclure aussi les propositions non relues", key="ft_include")
+    include = st.checkbox("Inclure les propositions et les avertissements non relus", key="ft_include")
+    if include:
+        st.caption("Les consignes générées signalées à revoir seront aussi exportées. Le rapport a_revoir "
+                   "et la provenance conservent leurs avertissements. Les doublons et les erreurs de structure "
+                   "ou de génération sans consigne utilisable restent hors du dataset d'entraînement.")
     percent = st.number_input("Validation (% des groupes de source)", 0, 40, 10, key="ft_validation")
     signature = digest([job, include, percent])
     if st.button("Préparer l'archive JSONL", disabled=runner.running, key="ft_export"):
@@ -216,15 +240,16 @@ def render_finetuning_page(rows, name, sources=None, *, generator_version=VERSIO
     clean = st.checkbox("Nettoyer les séparateurs isolés et les en-têtes de chapitre", value=True,
                          key="ft_clean", disabled=running,
                          help="Retire les lignes d'astérisques, un titre de chapitre initial et les espaces aux bords. Aucun récit n'est réécrit.")
-    max_chars = int(st.number_input("Longueur maximale d'un passage (caractères)", 500, 16000, 6000,
+    max_chars = int(st.number_input("Seuil d'avertissement sur la longueur (caractères)", 500, 16000, 6000,
                                     500, key="ft_max_chars", disabled=running))
     config = model_config()
     model = model_signature(config)
     signature = digest([[(row.uid, row.data, row.deleted) for row in rows], sources or {},
                         name, model, clean, max_chars])
-    st.write("Le parcours écarte les doublons, les pages éditoriales et les passages sexualisés ou ambigus. "
-             "Il génère une consigne française, puis contrôle sa cohérence avec le passage. "
-             "Les réponses gardent le texte source, avec le nettoyage choisi. Les contrôles restent automatiques.")
+    st.write("Les seuls rejets automatiques concernent les doublons et les erreurs de structure. "
+             "Aucun filtre de thème ou de genre n'est appliqué. Les contrôles de longueur, de langue, "
+             "de forme et de cohérence sont des avertissements à relire ; tu peux valider manuellement. "
+             "Le modèle prépare la consigne et conserve la réponse source, avec le nettoyage choisi.")
     if st.button("Préparer / reprendre le dataset", type="primary", disabled=running):
         try:
             job = create_job(rows, name, model, clean=clean, max_chars=max_chars, sources=sources)
@@ -245,19 +270,12 @@ def render_finetuning_page(rows, name, sources=None, *, generator_version=VERSIO
     legacy = state["parameters"].get("version") != generator_version
     stale = legacy or st.session_state.get("ft_signature") != signature
     if legacy:
-        st.warning("Cette préparation utilise l'ancien lecteur de conversations. Clique sur Préparer / reprendre "
-                   "pour reconnaître les messages système. L'ancienne sauvegarde reste conservée séparément.")
+        st.warning("Cette préparation utilise les anciens filtres. Clique sur Préparer / reprendre "
+                   "pour appliquer uniquement les rejets de doublons et d'erreurs de structure. "
+                   "L'ancienne sauvegarde reste conservée séparément.")
     pending = len(state["items"]) - len(state["results"])
-    structural = [item for item in state["items"] if item["flags"]]
-    st.info(f"{pending} passage(s) restant(s) pour le modèle · "
-            f"{len(structural)} mis de côté lors des contrôles avant génération.")
-    if structural:
-        with st.expander("Motifs des contrôles avant génération"):
-            for reason, count in Counter(reason for item in structural for reason in item["flags"]).most_common():
-                st.text(f"{count} entrée(s) : {reason}")
-    if not pending and len(structural) == len(state["items"]) and not legacy:
-        st.warning("Aucun passage n'est prêt pour la génération. Consulte les motifs ci-dessus ; "
-                   "charger le modèle ne modifiera pas ces contrôles de format ou de contenu.")
+    if not legacy:
+        render_preparation_report(state)
     st.caption("Sans provenance de livre, le découpage train/validation se base sur l'ordre des lignes "
                "du fichier. Les groupes de 16 passages et leur marge de 2 limitent les voisinages ; "
                "ils ne remplacent pas une séparation par chapitre ou par livre contrôlée manuellement.")

@@ -65,7 +65,9 @@ del book_generation.validate_narration
 book_ui.render_book_page = lambda on_load: None
 del finetuning.source_parts
 del finetuning.exclusion_report
+del finetuning.validate_instruction_text
 del finetuning_ui.render_exclusion_details
+del finetuning_ui.render_preparation_report
 finetuning_ui.render_finetuning_page = lambda rows, name, sources=None: None
 
 app = AppTest.from_file(str(Path("app.py").resolve()), default_timeout=30)
@@ -85,7 +87,9 @@ assert callable(book_generation.validate_narration)
 assert "generator_version" in __import__("inspect").signature(book_ui.render_book_page).parameters
 assert callable(finetuning.source_parts)
 assert callable(finetuning.exclusion_report)
+assert callable(finetuning.validate_instruction_text)
 assert callable(finetuning_ui.render_exclusion_details)
+assert callable(finetuning_ui.render_preparation_report)
 assert "generator_version" in __import__("inspect").signature(finetuning_ui.render_finetuning_page).parameters
 assert "resolve_classification" in __import__("inspect").signature(tagging.normalize_tags).parameters
 assert app.session_state.rows[0] is row

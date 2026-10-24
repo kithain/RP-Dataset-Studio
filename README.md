@@ -3,10 +3,20 @@
 Un éditeur graphique **100 % local** pour préparer les datasets de jeu de rôle destinés au fine-tuning Unsloth/QLoRA.
 Il fonctionne sur Windows 10/11 avec Python et s'ouvre dans un navigateur à l'adresse `http://127.0.0.1:8501`.
 
-**Version actuelle : 0.09c (alpha) — 24 octobre 2026.**
+**Version actuelle : 0.10a (alpha) — 24 octobre 2026.**
 
 Le code et son historique sont disponibles sur [GitHub](https://github.com/kithain/RP-Dataset-Studio).
 Le dépôt contient le programme, ses tests et un petit dataset de démonstration. Les datasets personnels, projets `.rpwork.json`, exports et environnements Python locaux sont exclus du suivi Git par `.gitignore`.
+
+## Changements de la version 0.10a
+
+- **Rejets automatiques limités aux problèmes techniques dans « 🛠️ Fine-tuning FR »** : le filtre par mots-clés sexualisés et le classement d'éligibilité par le modèle sont supprimés. Aucun thème ni genre du corpus ne provoque une exclusion automatique. Les doublons de réponse normalisée sont écartés ; les textes vides et les structures non prises en charge restent à corriger, avec leur motif.
+- **Avertissements sous contrôle de l'utilisateur** : les textes courts, longs ou possiblement éditoriaux restent disponibles pour le modèle. Les contrôles de langue, de forme et de fidélité signalent les résultats à relire. Un exemple avec avertissement peut être corrigé puis validé manuellement ; la validation impose seulement une consigne textuelle non vide. Les réponses sources restent conservées avec le nettoyage choisi. Les erreurs de génération et de contexte restent enregistrées sans troncature du corpus.
+- **Deux appels par passage** : le modèle prépare la consigne puis la vérifie, sans étape de sélection par thème. Le bilan indique la politique `duplicates_and_structure`. La page présente séparément les doublons/erreurs de structure et les avertissements sans exclusion. Le seuil en caractères est un seuil d'avertissement ; la limite technique réelle reste le contexte du modèle.
+- **Export des avertissements au choix** : l'option **Inclure les propositions et les avertissements non relus** ajoute aussi les consignes signalées à revoir, lorsqu'elles sont utilisables. Le rapport `a_revoir.jsonl` et la provenance conservent leurs motifs, y compris si ces exemples entrent dans le dataset. Les doublons et les erreurs sans consigne utilisable restent hors de l'entraînement. Sans cette option, seuls les exemples validés manuellement sont exportés pour l'entraînement.
+- **Repréparation nécessaire pour les anciens filtres** : la révision passe à `narration-dataset-v3`. Actualiser l'application puis cliquer sur **Préparer / reprendre le dataset** pour recalculer les contrôles. Cette action ne lance aucune génération et conserve l'ancienne sauvegarde séparément. Une préparation v1/v2 ne peut pas être reprise comme si elle utilisait les nouvelles règles. Aucun corpus personnel n'est relancé par la mise à jour.
+
+**Validation : 227 tests automatisés réussis**, dont six nouveaux tests couvrant l'absence de filtre thématique, les avertissements de longueur et de type de texte sans exclusion, les seuls blocages techniques, la validation manuelle malgré les avertissements, l'export volontaire des avertissements avec leurs motifs et leur affichage. Les 31 tests du préparateur passent également avec le Python portable. Les tests existants vérifient désormais deux appels au modèle par passage et le rejet des sauvegardes v1/v2 ; le test de rechargement conserve les ressources déjà ouvertes. Les vérifications de génération utilisent des données fictives et un modèle simulé. Aucun corpus personnel ni modèle réel n'est relancé par ces tests.
 
 ## Changements de la version 0.09c
 

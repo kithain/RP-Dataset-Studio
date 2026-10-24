@@ -32,8 +32,6 @@ def rows(count=1):
 
 
 def generated(system, prompt, *, schema, max_tokens):
-    if "statut" in schema["properties"]:
-        return json.dumps({"statut": "narratif_non_sexuel", "motif": "Scène quotidienne."})
     if "consigne" in schema["properties"]:
         return json.dumps({"consigne": PROMPT})
     return json.dumps({"verdict": "OK", "motif": "Fidèle."})
@@ -46,6 +44,49 @@ def read_bundle(blob):
 
 
 class TestFinetuning(unittest.TestCase):
+    def test_preparation_has_no_theme_filter(self):
+        # Clinical wording and genre labels, with no explicit scene or real corpus.
+        data = [Entry(1, {"text": TEXT + " Le glossaire définit le terme clitoris."}, 1),
+                Entry(2, {"text": TEXT + " Genres indiqués : romance adulte, horreur, érotisme."}, 2)]
+        job = create_job(data, "themes.jsonl", "m")
+        self.assertFalse(job["results"])
+        self.assertTrue(all(not item["flags"] for item in job["items"]))
+        self.assertEqual(job["parameters"]["automatic_exclusions"], "duplicates_and_structure")
+
+    def test_short_long_and_editorial_passages_are_warnings_only(self):
+        data = [Entry(1, {"text": "Bonjour, Lina."}, 1),
+                Entry(2, {"text": TEXT * 30}, 2),
+                Entry(3, {"text": "Copyright 2026. ISBN 1234567890. Tous droits réservés. " + TEXT}, 3)]
+        job = create_job(data, "warnings.jsonl", "m")
+        self.assertFalse(job["results"])
+        self.assertTrue(all(item["warnings"] for item in job["items"]))
+        self.assertTrue(all(not item["flags"] for item in job["items"]))
+
+    def test_only_duplicate_and_structural_errors_block_preparation(self):
+        data = [Entry(1, {"text": TEXT}, 1), Entry(2, {"text": TEXT}, 2),
+                Entry(3, {"text": ""}, 3), Entry(4, {"messages": "invalid"}, 4),
+                Entry(5, {"text": "Un court texte conservé."}, 5)]
+        job = create_job(data, "technical.jsonl", "m")
+        self.assertEqual({key: result["status"] for key, result in job["results"].items()},
+                         {"2": "exclu", "3": "a_revoir", "4": "a_revoir"})
+        self.assertNotIn("5", job["results"])
+
+    def test_manual_validation_can_override_quality_warnings_but_not_empty_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            job = create_job(rows(), "x", "m")
+            job["items"][0]["warnings"] = ["Longueur à vérifier."]
+            job["results"]["1"] = process_item(job["items"][0], generated)
+            self.assertEqual(job["results"]["1"]["status"], "a_revoir")
+            self.assertTrue(job["results"]["1"]["eligible"])
+            runner = Runner(job, Path(directory) / "state.json")
+            custom = "Ma consigne libre :\n[un format choisi par l'utilisateur]"
+            runner.review("1", custom, True)
+            self.assertEqual(runner.snapshot()["results"]["1"]["status"], "valide")
+            exported = read_bundle(export_bundle(runner.snapshot())[0])
+            self.assertEqual(exported["dataset.jsonl"][0]["messages"][0]["content"], custom)
+            with self.assertRaises(QwenError):
+                runner.review("1", " ", True)
+
     def test_exclusion_report_groups_duplicate_ids_and_keeps_exact_reasons(self):
         job = create_job(rows(4), "x", "m")
         for index, item in enumerate(job["items"][:3]):
@@ -185,11 +226,12 @@ class TestFinetuning(unittest.TestCase):
 
     def test_previous_reader_checkpoint_is_not_reused(self):
         job = create_job(rows(), "x", "m")
-        old = deepcopy(job)
-        old["parameters"]["version"] = "narration-dataset-v1"
-        self.assertNotEqual(VERSION, old["parameters"]["version"])
-        with self.assertRaisesRegex(ValueError, "incompatible"):
-            restore_checkpoint(job, json.dumps(old))
+        for version in ("narration-dataset-v1", "narration-dataset-v2"):
+            old = deepcopy(job)
+            old["parameters"]["version"] = version
+            self.assertNotEqual(VERSION, version)
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "incompatible"):
+                restore_checkpoint(job, json.dumps(old))
 
     def test_generation_keeps_target_and_uses_new_consigne_not_old_prompt(self):
         job = create_job(rows(), "x", "m")
@@ -198,16 +240,18 @@ class TestFinetuning(unittest.TestCase):
         self.assertEqual(result["status"], "propose")
         self.assertEqual(result["prompt"], PROMPT)
         self.assertFalse(result["human_review"])
-        self.assertEqual(generate.call_count, 3)
-        self.assertNotIn("Ancienne demande", generate.call_args_list[1].args[1])
+        self.assertEqual(generate.call_count, 2)
+        self.assertNotIn("Ancienne demande", generate.call_args_list[0].args[1])
         self.assertIn("non fiables", generate.call_args.args[0])
 
-    def test_noneligible_and_ambiguous_never_generate_instructions(self):
+    def test_model_has_no_content_exclusion_operation(self):
         item = create_job(rows(), "x", "m")["items"][0]
-        for label, expected in (("a_ecarter", "exclu"), ("a_revoir", "a_revoir")):
-            generate = Mock(return_value=json.dumps({"statut": label, "motif": "À écarter."}))
-            self.assertEqual(process_item(item, generate)["status"], expected)
-            generate.assert_called_once()
+        generate = Mock(side_effect=generated)
+        result = process_item(item, generate)
+        self.assertEqual(result["status"], "propose")
+        self.assertEqual([set(call.kwargs["schema"]["properties"]) for call in generate.call_args_list],
+                         [{"consigne"}, {"verdict", "motif"}])
+        self.assertTrue(result["eligible"])
 
     def test_critic_and_lexical_errors_are_kept_for_review(self):
         def wrong(system, prompt, *, schema, max_tokens):
@@ -220,6 +264,21 @@ class TestFinetuning(unittest.TestCase):
         self.assertEqual(result["status"], "a_revoir")
         self.assertIn("ancrée", result["reason"])
         self.assertIn("FAIT", result["reason"])
+
+    def test_user_can_export_unreviewed_warnings_with_their_report(self):
+        job = create_job(rows(2), "x", "m")
+        job["results"]["1"] = dict(process_item(job["items"][0], generated),
+                                    status="a_revoir", reason="DOUTE : consigne à vérifier.")
+        job["results"]["2"] = {"status": "a_revoir", "prompt": "", "eligible": False,
+                                 "human_review": False, "reason": "Erreur de contexte."}
+        default, _ = export_bundle(job)
+        self.assertFalse(read_bundle(default)["dataset.jsonl"])
+        included, _ = export_bundle(job, include_proposals=True)
+        report = read_bundle(included)
+        self.assertEqual(len(report["dataset.jsonl"]), 1)
+        self.assertEqual(len(report["a_revoir.jsonl"]), 2)
+        self.assertEqual(report["provenance.jsonl"][0]["review_status"], "a_revoir")
+        self.assertIn("DOUTE", report["provenance.jsonl"][0]["review_reason"])
 
     def test_checkpoint_rejects_changed_data_settings_and_invalid_results(self):
         job = create_job(rows(), "x", "m")
@@ -327,6 +386,19 @@ class TestFinetuningUI(unittest.TestCase):
         self.assertFalse(app.exception)
         return app
 
+    def test_warning_only_record_can_be_processed_without_loading_on_prepare(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
+                patch("finetuning_ui.SETTINGS", Path(directory) / "settings.json"), \
+                patch("qwen_ui.LocalQwen.load") as load:
+            app = self.open_page([Entry(1, {"text": "Un court texte conservé."}, 1)])
+            next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any(exp.label.startswith("Avertissements sans exclusion") for exp in app.expander))
+            self.assertFalse(next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").disabled)
+            self.assertFalse(app.session_state.ft_runner.snapshot()["results"])
+            load.assert_not_called()
+
     def test_existing_exclusions_show_summary_and_exact_line_without_reprocessing(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch("finetuning_ui.CHECKPOINTS", Path(directory)), \
@@ -407,7 +479,7 @@ class TestFinetuningUI(unittest.TestCase):
             app.session_state.ft_runner = Runner(old, path)
             app.run()
             self.assertFalse(app.exception)
-            self.assertTrue(any("ancien lecteur" in message.value for message in app.warning))
+            self.assertTrue(any("anciens filtres" in message.value for message in app.warning))
             self.assertTrue(next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").disabled)
             next(b for b in app.button if b.label == "Préparer / reprendre le dataset").click().run()
             self.assertFalse(app.exception)
@@ -452,7 +524,7 @@ class TestFinetuningUI(unittest.TestCase):
             with patch("finetuning_ui.QwenConfig.validate"), patch("finetuning_ui.generate_for_config", side_effect=fake_generator) as fake:
                 next(b for b in app.button if b.label == "Générer un aperçu (3 exemples)").click().run()
                 app.session_state.ft_runner.thread.join(5)
-                self.assertEqual(fake.call_count, 9)
+                self.assertEqual(fake.call_count, 6)
             app.run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.session_state.ft_runner.snapshot()["results"]), 3)
