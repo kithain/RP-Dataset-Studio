@@ -21,7 +21,7 @@ def set_filters(filters):
     st.session_state.pop("export_filtered", None)
 
 
-def render_filters(live):
+def render_filters(live, *, button_width="stretch"):
     current = {**default_filters(), **st.session_state.filters}
     catalogue = tag_catalogue(live)
     counts = {item["Tag"].casefold(): item["Entrées"] for item in catalogue}
@@ -37,11 +37,11 @@ def render_filters(live):
     for col, title, tag, status in zip(buttons[:4], ["SFW", "NSFW", "Needs Review", "Sans tags"],
                                       ["SFW", "NSFW", "Needs Review", None],
                                       ["all", "all", "all", "untagged"]):
-        if col.button(title, key=f"quick_tag_{title}", use_container_width=True):
+        if col.button(title, key=f"quick_tag_{title}", width=button_width):
             set_filters({**current, "tags": [tag] if tag else [], "excluded_tags": [],
                          "tag_mode": "all", "tag_status": status})
             st.rerun()
-    if buttons[4].button("Réinitialiser les filtres", use_container_width=True):
+    if buttons[4].button("Réinitialiser les filtres", width=button_width):
         set_filters(default_filters())
         st.rerun()
     # A fresh form after programmatic changes prevents stale widget values overriding them.
@@ -122,7 +122,7 @@ def render_filtered_export(filtered):
                                file_name=f"{base}_filtre_{suffix}.jsonl", mime="application/x-ndjson")
 
 
-def render_tag_browser(rows, mutation):
+def render_tag_browser(rows, mutation, *, button_width="stretch"):
     st.subheader("🏷️ Catalogue des tags")
     st.write("Retrouve un tag, consulte sa fréquence et ouvre les conversations correspondantes dans Explorer.")
     live = [row for row in rows if not row.deleted]
@@ -149,13 +149,13 @@ def render_tag_browser(rows, mutation):
     selected = st.selectbox("Tag à utiliser", list(counts),
                             format_func=lambda tag: f"{tag} · {counts[tag]} entrée(s)")
     a, b, c = st.columns(3)
-    if a.button("Voir ce tag dans Explorer", use_container_width=True):
+    if a.button("Voir ce tag dans Explorer", width=button_width):
         set_filters({**default_filters(), "tags": [selected]})
         st.session_state.navigate_after_action = "🔎 Explorer"
         st.rerun()
     for col, title, target, opposite in ((b, "Ajouter au filtre à conserver", "tags", "excluded_tags"),
                                          (c, "Ajouter au filtre à exclure", "excluded_tags", "tags")):
-        if col.button(title, use_container_width=True):
+        if col.button(title, width=button_width):
             filters = {**default_filters(), **st.session_state.filters}
             filters[target] = [tag for tag in filters[target] if tag.casefold() != selected.casefold()] + [selected]
             filters[opposite] = [tag for tag in filters[opposite] if tag.casefold() != selected.casefold()]

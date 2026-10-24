@@ -368,7 +368,7 @@ rows = st.session_state.rows
 
 with st.sidebar:
     st.markdown("# 🎭 RP Dataset Studio")
-    st.caption("Gestion locale de datasets JDR · v0.10a")
+    st.caption("Gestion locale de datasets JDR · v0.10b")
     render_qwen_settings()
     st.divider()
     st.markdown("**Ouvrir un dataset**")
@@ -380,18 +380,18 @@ with st.sidebar:
                      "Les projets .rpwork.json retrouvent leurs annotations sans nouveau classement.")
     upload = st.file_uploader("Importer un fichier", type=["jsonl", "json", "csv", "tsv", "parquet"],
                               help="JSONL, JSON, CSV, TSV, Parquet, projets .rpwork.json")
-    if st.button("Importer le fichier sélectionné", disabled=upload is None, use_container_width=True):
+    if st.button("Importer le fichier sélectionné", disabled=upload is None, width="stretch"):
         import_file(io.BytesIO(upload.getvalue()), upload.name)
     st.caption("Pour les gros fichiers, ouvre directement un chemin local :")
     local_path = st.text_input("Chemin du fichier sur ce PC", placeholder=r"C:\\Datasets\\rp_train.jsonl")
-    if st.button("Ouvrir le chemin local", disabled=not local_path.strip(), use_container_width=True):
+    if st.button("Ouvrir le chemin local", disabled=not local_path.strip(), width="stretch"):
         path = Path(local_path.strip().strip('"'))
         if not path.is_file():
             st.error("Ce fichier n'existe pas.")
         else:
             with path.open("rb") as handle:
                 import_file(handle, path.name)
-    if st.button("Charger le dataset de démonstration", use_container_width=True):
+    if st.button("Charger le dataset de démonstration", width="stretch"):
         sample = BASE / "examples" / "exemple_rp.jsonl"
         with sample.open("rb") as handle:
             import_file(handle, sample.name)
@@ -399,7 +399,7 @@ with st.sidebar:
     if st.session_state.dataset_name:
         st.caption(f"Dataset : {st.session_state.dataset_name}")
         if st.button("↶ Annuler la dernière action", disabled=not st.session_state.history,
-                     use_container_width=True):
+                     width="stretch"):
             undo()
             st.rerun()
     page = st.radio("Navigation", ["🔎 Explorer", "📖 Depuis un livre", FINETUNING_PAGE, "🏷️ Tags", "🧩 Fusionner", "🧹 Qualité", "📦 Exporter", "🗑️ Corbeille", "❔ Aide"],
@@ -484,14 +484,14 @@ if page == "🔎 Explorer":
         c1, c2, c3 = st.columns([1.4, 1.4, 2])
         with c1:
             if st.button(f"🗑️ Supprimer {len(chosen)} cochée(s)", disabled=not chosen,
-                         use_container_width=True):
+                         width="stretch"):
                 delete_some(chosen)
                 st.rerun()
         with c2:
             lang_selected = st.selectbox("Langue des entrées cochées", options=list(LANG_CODES),
                                          format_func=lambda x: f"{x} — {LANG_CODES[x]}")
             if st.button("Attribuer cette langue", disabled=not chosen,
-                         use_container_width=True):
+                         width="stretch"):
                 targets = [r for r in live if r.uid in chosen]
                 before = [(r.uid, r.language_override) for r in targets]
                 for r in targets:
@@ -504,7 +504,7 @@ if page == "🔎 Explorer":
             confirm = st.checkbox(f"Confirmer la suppression des {len(filtered)} résultats",
                                   key=f"confirm_{st.session_state.revision}")
             if st.button("Supprimer TOUS les résultats filtrés", type="primary",
-                         disabled=not filtered or not confirm, use_container_width=True):
+                         disabled=not filtered or not confirm, width="stretch"):
                 delete_some({r.uid for r in filtered})
                 st.rerun()
     st.divider()

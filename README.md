@@ -6,7 +6,7 @@ RP Dataset Studio permet d’explorer, corriger, organiser et transformer des te
 
 Le projet privilégie la liberté d’écriture : des personnages nuancés, des dialogues naturels, des univers cohérents et des histoires qui peuvent aborder des émotions fortes, des contradictions ou des sujets difficiles. Tu choisis les sources, les thèmes et la direction éditoriale de ton dataset.
 
-**Version actuelle : 0.10a — alpha — 24 octobre 2026.**
+**Version actuelle : 0.10b — alpha — 24 octobre 2026.**
 
 [Voir le projet sur GitHub](https://github.com/kithain/RP-Dataset-Studio)
 
@@ -224,7 +224,9 @@ Les exports conversationnels textuels peuvent omettre des champs propres à cert
 
 Les gros imports restent en mémoire et peuvent consommer une quantité importante de RAM.
 
-**Dernière validation de la version 0.10a : 227 tests automatisés réussis.** Les tests courants simulent les appels au modèle ; les essais réels sont documentés séparément dans le dépôt.
+La version 0.10b remplace l’ancien paramètre de largeur de Streamlit par son API actuelle, en conservant la largeur des boutons et des tableaux. Les messages répétés dans la console lors de l’actualisation des motifs d’exclusion sont ainsi supprimés. L’application demande désormais Streamlit 1.49 ou plus récent.
+
+**Dernière validation de la version 0.10b : 228 tests automatisés réussis.** Un test vérifie l’absence de ces avertissements sur les boutons et les tableaux d’exclusion après plusieurs affichages. Les tests ciblés d’interface et de rechargement passent aussi avec le Python portable. Le rechargement des modules conserve le dataset et les ressources Qwen déjà ouverts. Les tests courants simulent les appels au modèle ; les essais réels sont documentés séparément dans le dépôt.
 
 Pour lancer la suite avec le Python portable :
 
@@ -236,6 +238,7 @@ Pour lancer la suite avec le Python portable :
 
 | Version | Évolution principale |
 | --- | --- |
+| **0.10b** | Compatibilité Streamlit : suppression des avertissements répétés liés à la largeur des éléments. |
 | **0.10a** | Choix éditoriaux laissés à l’utilisateur, contrôles techniques et export volontaire des avertissements. |
 | **0.09c** | Motifs d’exclusion détaillés et consultables. |
 | **0.09b** | Prise en charge du message système dans le préparateur. |

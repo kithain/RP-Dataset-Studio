@@ -64,7 +64,7 @@ def model_signature(config):
     return value
 
 
-def render_exclusion_details(job):
+def render_exclusion_details(job, *, width="stretch"):
     report = exclusion_report(job)
     if not report["total"]:
         return
@@ -72,10 +72,10 @@ def render_exclusion_details(job):
         st.caption("Ces motifs proviennent de la préparation en cours : contrôles avant génération, "
                    "classement du modèle ou décision manuelle. Chaque entrée compte une fois dans le résumé ; "
                    "les numéros de doublons y sont regroupés. Les décisions automatiques restent à vérifier.")
-        st.dataframe(report["summary"], hide_index=True, use_container_width=True,
+        st.dataframe(report["summary"], hide_index=True, width=width,
                      key=f"ft_exclusions_summary_{job['id']}")
         st.markdown("**Détail par entrée : numéro, ligne source et motif exact**")
-        st.dataframe(report["rows"], hide_index=True, use_container_width=True, height=260,
+        st.dataframe(report["rows"], hide_index=True, width=width, height=260,
                      key=f"ft_exclusions_rows_{job['id']}")
         payload = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in report["rows"])
         st.download_button("Télécharger les motifs d'exclusion", payload.encode("utf-8"),

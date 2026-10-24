@@ -43,6 +43,7 @@ import core
 import tagging
 import tag_management
 import tagging_ui
+import tag_browser_ui
 import qwen_ui
 import llm_tagging
 import book_generation
@@ -59,6 +60,8 @@ tagging.normalize_tags = legacy_normalize
 del core.purge_deleted
 del tag_management.untagged_entries
 del tagging_ui.analyze_tag_batch
+tag_browser_ui.render_filters = lambda live: None
+tag_browser_ui.render_tag_browser = lambda rows, mutation: None
 del llm_tagging.generate_json
 del qwen_ui.generate_book
 del book_generation.validate_narration
@@ -66,7 +69,7 @@ book_ui.render_book_page = lambda on_load: None
 del finetuning.source_parts
 del finetuning.exclusion_report
 del finetuning.validate_instruction_text
-del finetuning_ui.render_exclusion_details
+finetuning_ui.render_exclusion_details = lambda job: None
 del finetuning_ui.render_preparation_report
 finetuning_ui.render_finetuning_page = lambda rows, name, sources=None: None
 
@@ -81,6 +84,8 @@ assert not app.exception, app.exception
 assert callable(core.purge_deleted)
 assert callable(tag_management.untagged_entries)
 assert callable(tagging_ui.analyze_tag_batch)
+assert "button_width" in __import__("inspect").signature(tag_browser_ui.render_filters).parameters
+assert "button_width" in __import__("inspect").signature(tag_browser_ui.render_tag_browser).parameters
 assert callable(llm_tagging.generate_json)
 assert callable(qwen_ui.generate_book)
 assert callable(book_generation.validate_narration)
@@ -89,6 +94,7 @@ assert callable(finetuning.source_parts)
 assert callable(finetuning.exclusion_report)
 assert callable(finetuning.validate_instruction_text)
 assert callable(finetuning_ui.render_exclusion_details)
+assert "width" in __import__("inspect").signature(finetuning_ui.render_exclusion_details).parameters
 assert callable(finetuning_ui.render_preparation_report)
 assert "generator_version" in __import__("inspect").signature(finetuning_ui.render_finetuning_page).parameters
 assert "resolve_classification" in __import__("inspect").signature(tagging.normalize_tags).parameters
