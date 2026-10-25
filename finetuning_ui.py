@@ -10,11 +10,11 @@ from pathlib import Path
 import streamlit as st
 
 from finetuning import (VERSION, Runner, create_job, digest, exclusion_report, export_bundle,
-                        restore_checkpoint, save_checkpoint)
+                        request_pause, restore_checkpoint, save_checkpoint, start_job)
 from install_assets import resolve_setting
 from llm_tagging import BASE, DEFAULT_SERVER, QwenConfig, QwenError
 from memory_guard import memory_snapshot
-from qwen_ui import clients, generate_for_config
+from qwen_ui import clients, generate_for_config, load_config, unload_model
 
 
 SETTINGS = BASE / "finetuning_settings.json"
@@ -118,7 +118,7 @@ def render_progress(runner, stale):
     if runner.running:
         st.info("Passe en cours sur ce PC. Tu peux demander une pause ; elle prend effet après l'exemple en cours.")
         if st.button("Pause après l'exemple en cours", key="ft_pause"):
-            runner.stop.set()
+            request_pause(runner)
             st.info("Pause demandée.")
     if runner.notice:
         st.info(runner.notice)
@@ -224,12 +224,12 @@ def render_finetuning_page(rows, name, sources=None, *, generator_version=VERSIO
         if st.button("Charger le GGUF de préparation", disabled=running or not st.session_state.ft_model.strip()):
             try:
                 with st.spinner("Chargement local avec surveillance mémoire..."):
-                    clients().load(model_config())
+                    load_config(model_config())
                 st.success("Modèle chargé. Aucun exemple n'a été traité.")
             except QwenError as exc:
                 st.error(str(exc))
         if st.button("Décharger le modèle de préparation", disabled=running):
-            clients().unload()
+            unload_model()
             st.success("Modèle déchargé.")
         st.caption("Le moteur est partagé avec les autres pages : un seul modèle est conservé à la fois.")
     if not name:
@@ -287,7 +287,7 @@ def render_finetuning_page(rows, name, sources=None, *, generator_version=VERSIO
         try:
             config.validate()
             generator = partial(generate_for_config, config, _pool=clients())
-            runner.start(generator, limit=3 if preview else None)
+            start_job(runner, generator, limit=3 if preview else None)
         except QwenError as exc:
             st.error(str(exc))
     render_progress(runner, stale)

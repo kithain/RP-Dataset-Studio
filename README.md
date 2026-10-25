@@ -6,7 +6,7 @@ RP Dataset Studio permet d’explorer, corriger, organiser et transformer des te
 
 Le projet privilégie la liberté d’écriture : des personnages nuancés, des dialogues naturels, des univers cohérents et des histoires qui peuvent aborder des émotions fortes, des contradictions ou des sujets difficiles. Tu choisis les sources, les thèmes et la direction éditoriale de ton dataset.
 
-**Version actuelle : 0.10b — alpha — 24 octobre 2026.**
+**Version actuelle : 0.11a — alpha — 25 octobre 2026.**
 
 [Voir le projet sur GitHub](https://github.com/kithain/RP-Dataset-Studio)
 
@@ -142,6 +142,16 @@ La surveillance mémoire peut arrêter le processus de modèle appartenant à l�
 
 Le comportement des réponses dépend du modèle choisi. Commence par un aperçu avant de lancer une longue passe.
 
+## Suivre l'activité dans la console
+
+La console affiche le chargement et le déchargement du modèle, l'attente du moteur partagé, les requêtes en cours et leurs durées. Le budget de sortie et les compteurs de tokens sont indiqués lorsqu'ils sont disponibles.
+
+Pour les lots de narration, elle indique aussi le début de la passe, l'entrée en cours, la génération de sa consigne, sa vérification, la sauvegarde de progression et le bilan final. Les demandes de pause, les erreurs et les entrées restant à traiter sont signalées.
+
+Pendant le chargement, une requête ou une attente prolongée du moteur, un rappel **EN COURS** apparaît toutes les dix secondes jusqu'à la fin de cette attente. Il indique que l'opération est toujours attendue ; ce n'est pas une mesure de progression du calcul. La fin du lot annonce **Lot inactif**, même si le modèle est conservé en mémoire, et le bilan indique les entrées restant à traiter après un aperçu, une pause ou une erreur.
+
+Les mêmes messages sont enregistrés dans `data/logs/activite_llm.log`, avec rotation automatique pour limiter la taille du journal. Les prompts et les réponses du corpus ne sont pas copiés dans les messages d'activité ; les étapes, identifiants, compteurs et erreurs servent au suivi.
+
 ## Organiser les données avec les tags
 
 Les tags permettent de retrouver des genres, des thèmes, des personnages, des ambiances ou des styles de narration.
@@ -226,7 +236,7 @@ Les gros imports restent en mémoire et peuvent consommer une quantité importan
 
 La version 0.10b remplace l’ancien paramètre de largeur de Streamlit par son API actuelle, en conservant la largeur des boutons et des tableaux. Les messages répétés dans la console lors de l’actualisation des motifs d’exclusion sont ainsi supprimés. L’application demande désormais Streamlit 1.49 ou plus récent.
 
-**Dernière validation de la version 0.10b : 228 tests automatisés réussis.** Un test vérifie l’absence de ces avertissements sur les boutons et les tableaux d’exclusion après plusieurs affichages. Les tests ciblés d’interface et de rechargement passent aussi avec le Python portable. Le rechargement des modules conserve le dataset et les ressources Qwen déjà ouverts. Les tests courants simulent les appels au modèle ; les essais réels sont documentés séparément dans le dépôt.
+**Dernière validation de la version 0.11a : 238 tests automatisés réussis**, dont dix nouveaux tests du suivi d'activité. Ils couvrent les rappels d'attente et leur arrêt, les erreurs, les requêtes en file d'attente, les compteurs sans copie du corpus, la pause/reprise, la conservation d'un client déjà chargé et le journal local borné. Les tests d'activité et de rechargement passent également avec le Python portable. Les tests courants simulent les appels au modèle ; les essais réels sont documentés séparément dans le dépôt.
 
 Pour lancer la suite avec le Python portable :
 
@@ -238,6 +248,7 @@ Pour lancer la suite avec le Python portable :
 
 | Version | Évolution principale |
 | --- | --- |
+| **0.11a** | Suivi des tâches LLM dans la console et dans un journal local, avec rappels d'attente et bilans. |
 | **0.10b** | Compatibilité Streamlit : suppression des avertissements répétés liés à la largeur des éléments. |
 | **0.10a** | Choix éditoriaux laissés à l’utilisateur, contrôles techniques et export volontaire des avertissements. |
 | **0.09c** | Motifs d’exclusion détaillés et consultables. |

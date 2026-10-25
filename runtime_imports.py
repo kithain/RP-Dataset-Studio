@@ -15,13 +15,13 @@ REQUIRED_API = (
     ("tag_management", {"untagged_entries": ()}),
     ("tagging_ui", {"analyze_tag_batch": ()}),
     ("tag_browser_ui", {"render_filters": ("button_width",), "render_tag_browser": ("button_width",)}),
-    ("llm_tagging", {"generate_json": (), "QwenConfig": ("low_memory",)}),
-    ("qwen_ui", {"generate_book": (), "generate_for_config": ()}),
+    ("llm_tagging", {"generate_json": (), "load_with_activity": (), "QwenConfig": ("low_memory",)}),
+    ("qwen_ui", {"generate_book": (), "generate_for_config": (), "configured_client": (), "load_config": ()}),
     ("book_generation", {"validate_narration": ()}),
     ("book_ui", {"render_book_page": ("generator_version",)}),
-    ("finetuning", {"source_parts": (), "exclusion_report": (), "validate_instruction_text": ()}),
+    ("finetuning", {"source_parts": (), "exclusion_report": (), "validate_instruction_text": (), "start_job": ()}),
     ("finetuning_ui", {"render_finetuning_page": ("generator_version",), "render_exclusion_details": ("width",),
-                       "render_preparation_report": ()}),
+                       "render_preparation_report": (), "start_job": ()}),
 )
 
 

@@ -39,6 +39,8 @@ class TestRuntimeImports(unittest.TestCase):
         script = r'''
 from pathlib import Path
 from streamlit.testing.v1 import AppTest
+from types import SimpleNamespace
+from unittest.mock import Mock
 import core
 import tagging
 import tag_management
@@ -53,6 +55,9 @@ import finetuning_ui
 
 row = core.Entry(11, {"text": "Romance"}, 4)
 pool = qwen_ui.clients()
+warm_client = SimpleNamespace(config=llm_tagging.QwenConfig(), close=Mock())
+pool.client = warm_client
+previous_errors = (llm_tagging.QwenError, llm_tagging.QwenUnavailable, llm_tagging.QwenContextError)
 original_normalize = tagging.normalize_tags
 def legacy_normalize(value):
     return original_normalize(value)
@@ -63,14 +68,18 @@ del tagging_ui.analyze_tag_batch
 tag_browser_ui.render_filters = lambda live: None
 tag_browser_ui.render_tag_browser = lambda rows, mutation: None
 del llm_tagging.generate_json
+del llm_tagging.load_with_activity
 del qwen_ui.generate_book
+del qwen_ui.configured_client
 del book_generation.validate_narration
 book_ui.render_book_page = lambda on_load: None
 del finetuning.source_parts
 del finetuning.exclusion_report
 del finetuning.validate_instruction_text
+del finetuning.start_job
 finetuning_ui.render_exclusion_details = lambda job: None
 del finetuning_ui.render_preparation_report
+del finetuning_ui.start_job
 finetuning_ui.render_finetuning_page = lambda rows, name, sources=None: None
 
 app = AppTest.from_file(str(Path("app.py").resolve()), default_timeout=30)
@@ -87,6 +96,9 @@ assert callable(tagging_ui.analyze_tag_batch)
 assert "button_width" in __import__("inspect").signature(tag_browser_ui.render_filters).parameters
 assert "button_width" in __import__("inspect").signature(tag_browser_ui.render_tag_browser).parameters
 assert callable(llm_tagging.generate_json)
+assert callable(llm_tagging.load_with_activity)
+assert (llm_tagging.QwenError, llm_tagging.QwenUnavailable, llm_tagging.QwenContextError) == previous_errors
+assert book_generation.QwenError is llm_tagging.QwenError
 assert callable(qwen_ui.generate_book)
 assert callable(book_generation.validate_narration)
 assert "generator_version" in __import__("inspect").signature(book_ui.render_book_page).parameters
@@ -102,6 +114,8 @@ assert app.session_state.rows[0] is row
 assert app.session_state.history == [{"kind": "lang", "before": [(11, None)]}]
 assert app.session_state.entry_sources == {11: "source.jsonl"}
 assert qwen_ui.clients() is pool
+assert qwen_ui.configured_client(pool, llm_tagging.QwenConfig()) is warm_client
+warm_client.close.assert_not_called()
 next(widget for widget in app.radio if widget.label == "Navigation").set_value("🧹 Qualité").run()
 assert not app.exception, app.exception
 next(widget for widget in app.button if widget.label == "Analyser uniquement les entrées sans tags").click().run()

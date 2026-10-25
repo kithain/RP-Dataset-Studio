@@ -15,6 +15,7 @@ import zipfile
 from book_generation import non_narrative_reason, validate_narration
 from core import ROLE_NAMES, as_messages
 from llm_tagging import QwenContextError, QwenError, QwenUnavailable
+from activity_log import Activity, event
 
 
 VERSION = "narration-dataset-v3"
@@ -179,6 +180,7 @@ def save_checkpoint(job, path):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
+    event("Progression sauvegardée", lot=job["id"], traites=len(job["results"]), total=len(job["items"]))
 
 
 def restore_checkpoint(job, payload):
@@ -236,8 +238,15 @@ def instruction_checks(prompt, text):
 
 
 def process_item(item, generate):
+    with Activity("Préparation d'une entrée", heartbeat=False, entree=item["id"]):
+        result = _process_item(item, generate)
+        event("Résultat de l'entrée", statut=result["status"])
+        return result
+
+
+def _process_item(item, generate):
     payload = json.dumps({"source": item["text"]}, ensure_ascii=False)
-    value = parse_result(generate(SYSTEM,
+    value = parse_result(_generate_step(generate, "generation", SYSTEM,
         "Rédige une consigne autonome de 20 à 45 mots en français correspondant au texte fourni. "
         "Respecte son type : récit, description, dialogue ou document ; ne transforme pas un document en scène inventée. "
         "Commence par Raconte, Décris ou Écris. Ancre-la dans au moins deux éléments concrets du texte. "
@@ -252,7 +261,7 @@ def process_item(item, generate):
         instruction_checks(prompt, item["text"])
     except QwenError as exc:
         issues.append(str(exc))
-    critic = parse_result(generate(SYSTEM,
+    critic = parse_result(_generate_step(generate, "verification", SYSTEM,
         "Vérifie la consigne face à la source. OK seulement si elle est fidèle et française ; "
         "FAIT pour un fait ajouté, PERSONNAGE pour une identité ou relation ajoutée, TEMPS pour "
         "une contradiction de temps ou point de vue, LANGUE pour une autre langue, DOUTE sinon. "
@@ -264,6 +273,12 @@ def process_item(item, generate):
     return {"status": "a_revoir" if issues else "propose", "prompt": prompt,
             "reason": " ".join(issues) or "Contrôles automatiques passés ; relecture humaine attendue.",
             "eligible": True, "critic": critic, "human_review": False}
+
+
+def _generate_step(generate, step, system, prompt, *, schema, max_tokens):
+    title = "Génération de la consigne" if step == "generation" else "Vérification de la consigne"
+    with Activity(title, heartbeat=False, etape=step):
+        return generate(system, prompt, schema=schema, max_tokens=max_tokens)
 
 
 class Runner:
@@ -283,13 +298,7 @@ class Runner:
             return deepcopy(self.job)
 
     def start(self, generate, limit=None):
-        if self.running:
-            return False
-        self.stop.clear()
-        self.notice = ""
-        self.thread = threading.Thread(target=self._run, args=(generate, limit), daemon=True)
-        self.thread.start()
-        return True
+        return start_job(self, generate, limit=limit)
 
     def _run(self, generate, limit):
         processed = 0
@@ -299,29 +308,35 @@ class Runner:
                     break
                 if item["id"] in self.job["results"]:
                     continue
+                event("Entrée en cours", entree=item["id"], traites=len(self.job["results"]),
+                      total=len(self.job["items"]))
                 try:
                     result = process_item(item, generate)
                     with self.lock:
                         self.job["results"][item["id"]] = result
                         self.job["errors"].pop(item["id"], None)
                 except QwenUnavailable as exc:
+                    event("Passe interrompue par le moteur", entree=item["id"], erreur=str(exc))
                     with self.lock:
                         self.job["errors"][item["id"]] = str(exc)
                     self.notice = "Moteur interrompu ; la progression est conservée."
                     save_checkpoint(self.snapshot(), self.checkpoint)
                     break
                 except QwenContextError as exc:
+                    event("Entrée à revoir : contexte dépassé", entree=item["id"], erreur=str(exc))
                     with self.lock:
                         self.job["results"][item["id"]] = {"status": "a_revoir", "prompt": "",
                             "eligible": False, "reason": str(exc), "human_review": False}
                         self.job["errors"].pop(item["id"], None)
                 except (QwenError, ValueError) as exc:
+                    event("Entrée en erreur : reprise possible", entree=item["id"], erreur=str(exc))
                     with self.lock:
                         self.job["errors"][item["id"]] = str(exc)
                 processed += 1
                 save_checkpoint(self.snapshot(), self.checkpoint)
         except Exception as exc:
             self.notice = f"Passe arrêtée : {exc}. Les résultats restent en mémoire."
+            event("Passe arrêtée", erreur=str(exc))
         if self.stop.is_set():
             self.notice = "Pause effectuée. Les exemples terminés sont sauvegardés."
 
@@ -338,6 +353,41 @@ class Runner:
             result.update(status="valide" if accept else "exclu", prompt=prompt,
                           human_review=True, reason="Décision manuelle.")
         save_checkpoint(self.snapshot(), self.checkpoint)
+
+
+def request_pause(runner):
+    runner.stop.set()
+    event("Pause demandée : attente de la fin de l'entrée en cours", lot=runner.job["id"])
+
+
+def run_logged_job(runner, generate, limit=None):
+    runner.notice = ""
+    initial = runner.snapshot()
+    pending = len(initial["items"]) - len(initial["results"])
+    amount = pending if limit is None else min(limit, pending)
+    with Activity("Lot de narration", heartbeat=False, lot=initial["id"],
+                  mode="aperçu" if limit is not None else "traitement complet", a_traiter=amount):
+        runner._run(generate, limit)
+        current = runner.snapshot()
+        done = len(current["results"])
+        state = ("pause" if runner.stop.is_set() else "arrêt avec message" if runner.notice else
+                 "terminé" if done == len(current["items"]) else "aperçu terminé" if limit is not None else
+                 "reste des entrées à traiter")
+        event("Bilan du lot", etat=state, traites=done, total=len(current["items"]),
+              restants=len(current["items"]) - done, erreurs=len(current["errors"]))
+        event("Lot inactif : aucune requête en cours pour ce lot ; modèle éventuellement conservé en mémoire")
+
+
+def start_job(runner, generate, *, limit=None):
+    """Also works with a Runner already retained by a pre-update Streamlit session."""
+    if runner.running:
+        event("Lot déjà en cours ; aucun second traitement lancé", lot=runner.job["id"])
+        return False
+    runner.stop.clear()
+    runner.notice = ""
+    runner.thread = threading.Thread(target=run_logged_job, args=(runner, generate, limit), daemon=True)
+    runner.thread.start()
+    return True
 
 
 def export_bundle(job, *, include_proposals=False, validation_percent=10):
